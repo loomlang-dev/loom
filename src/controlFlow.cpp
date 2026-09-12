@@ -247,7 +247,16 @@ std::string Compiler::compileFor(const ForStmt &forStmt, SourceLoc loc) {
   }
 
   vars.emplace(
-    iterName, VariableData{.name = iterName, .mangledName = iterMangled, .type = Type::IntegerType(), .scope = forStmt.body.get(), .value = std::nullopt, .constant = false}
+    iterName,
+    VariableData{
+      .name = iterName,
+      .mangledName = iterMangled,
+      .type = Type::IntegerType(),
+      .scope = forStmt.body.get(),
+      .value = std::nullopt,
+      .constant = false,
+      .emitNamespace = datapackNamespace,
+    }
   );
 
   if (startExpr.precomputed) {

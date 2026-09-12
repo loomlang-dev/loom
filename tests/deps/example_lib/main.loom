@@ -1,0 +1,40 @@
+extern func add(a: int, b: int): int {
+  return a + b
+}
+
+extern let counter: int = 0;
+
+extern enum Color {
+  Red = 0,
+  Green = 1,
+  Blue = 2
+}
+
+extern func colorValue(c: Color): int {
+  return c
+}
+
+enum HiddenEnum {
+  A = 0,
+  B = 1
+}
+
+extern struct Greeter {
+  name: string
+
+  func Greeter(n: string) {
+    this.name = n
+  }
+
+  func greet(): string {
+    return this.name
+  }
+}
+
+func hiddenHelper(): int {
+  return 7
+}
+
+struct Hidden {
+  value: int
+}

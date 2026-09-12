@@ -389,8 +389,12 @@ std::unique_ptr<Expr> Parser::parsePrimary() {
   }
   case TokenKind::Amp: {
     advance();
+    SourceLoc refNameLoc = locOf(peek());
     std::string name = parseNamespacedIdentifier();
-    return makeExpr(tok, ReferenceExpr{.targetName = std::move(name)});
+    refNameLoc.endByte = previous().endByte;
+    auto refExpr = makeExpr(tok, ReferenceExpr{.targetName = std::move(name)});
+    refExpr->loc = refNameLoc;
+    return refExpr;
   }
   case TokenKind::LParen: {
     advance();
@@ -438,10 +442,14 @@ std::unique_ptr<Expr> Parser::parsePrimary() {
         fields.push_back(StructExprField{.name = std::move(fieldName), .value = std::move(value)});
       });
       expect(TokenKind::RBrace, "'}' to close struct literal");
-      return makeExpr(tok, StructExpr{.name = std::move(name), .fields = std::move(fields)});
+      auto structExpr = makeExpr(tok, StructExpr{.name = std::move(name), .fields = std::move(fields)});
+      structExpr->loc = nameLoc;
+      return structExpr;
     }
 
-    return makeExpr(tok, VarRefExpr{.name = std::move(name)});
+    auto varExpr = makeExpr(tok, VarRefExpr{.name = std::move(name)});
+    varExpr->loc = nameLoc;
+    return varExpr;
   }
   default:
     error(tok, std::format("Expected an expression, found '{}'", tok.text.empty() ? tokenKindName(tok.kind) : std::string(tok.text)));
@@ -703,7 +711,7 @@ std::unique_ptr<Stmt> Parser::parseFuncDecl(std::optional<std::string> tag, bool
   );
 }
 
-std::unique_ptr<Stmt> Parser::parseStructDecl(bool isExport) {
+std::unique_ptr<Stmt> Parser::parseStructDecl(bool isExport, bool isExtern) {
   const Token &startTok = peek();
   advance();
   const Token &nameTok = expect(TokenKind::Identifier, "struct name");
@@ -777,10 +785,12 @@ std::unique_ptr<Stmt> Parser::parseStructDecl(bool isExport) {
     skipNewlines();
   }
   expect(TokenKind::RBrace, "'}' to close struct");
-  return makeStmt(startTok, StructDeclStmt{.isExport = isExport, .name = std::move(name), .nameLoc = nameLoc, .fields = std::move(fields), .methods = std::move(methods)});
+  return makeStmt(
+    startTok, StructDeclStmt{.isExport = isExport, .isExtern = isExtern, .name = std::move(name), .nameLoc = nameLoc, .fields = std::move(fields), .methods = std::move(methods)}
+  );
 }
 
-std::unique_ptr<Stmt> Parser::parseEnumDecl(bool isExport) {
+std::unique_ptr<Stmt> Parser::parseEnumDecl(bool isExport, bool isExtern) {
   const Token &startTok = peek();
   advance();
   const Token &nameTok = expect(TokenKind::Identifier, "enum name");
@@ -811,7 +821,7 @@ std::unique_ptr<Stmt> Parser::parseEnumDecl(bool isExport) {
     variants.push_back(EnumVariantDecl{.name = std::move(vname), .nameLoc = vnameLoc, .value = std::move(value)});
   });
   expect(TokenKind::RBrace, "'}' to close enum");
-  return makeStmt(startTok, EnumDeclStmt{.isExport = isExport, .name = std::move(name), .nameLoc = nameLoc, .variants = std::move(variants)});
+  return makeStmt(startTok, EnumDeclStmt{.isExport = isExport, .isExtern = isExtern, .name = std::move(name), .nameLoc = nameLoc, .variants = std::move(variants)});
 }
 
 std::unique_ptr<Stmt> Parser::parseNamespaceDecl() {
@@ -827,10 +837,19 @@ std::unique_ptr<Stmt> Parser::parseNamespaceDecl() {
 std::unique_ptr<Stmt> Parser::parseImportDecl() {
   const Token &startTok = peek();
   advance();
-  std::string path = parseImportPathText();
+
+  bool isDependency = false;
+  std::string path;
+  if (check(TokenKind::Identifier)) {
+    isDependency = true;
+    path = std::string(expect(TokenKind::Identifier, "dependency name").text);
+  } else {
+    path = parseImportPathText();
+  }
+
   std::optional<std::string> alias;
   if (match(TokenKind::KwAs)) alias = std::string(expect(TokenKind::Identifier, "alias name").text);
-  return makeStmt(startTok, ImportStmt{.path = std::move(path), .alias = std::move(alias)});
+  return makeStmt(startTok, ImportStmt{.path = std::move(path), .alias = std::move(alias), .isDependency = isDependency});
 }
 
 std::unique_ptr<Stmt> Parser::parseReturnStmt() {
@@ -985,6 +1004,7 @@ std::unique_ptr<Stmt> Parser::tryParseAssignOrCallStmt() {
       expr = makeExpr(startTok, CallExpr{.name = std::move(name), .nameLoc = nameLoc, .arguments = std::move(args)});
     } else {
       expr = makeExpr(startTok, VarRefExpr{.name = std::move(name)});
+      expr->loc = nameLoc;
     }
 
     expr = parsePostfixContinuation(std::move(expr));
@@ -1048,11 +1068,11 @@ std::unique_ptr<Stmt> Parser::parseStatement() {
     if (tag.has_value() || isExport || isExtern) error(peek(), "'import' cannot be preceded by a tag or modifiers");
     stmt = parseImportDecl();
   } else if (check(TokenKind::KwEnum)) {
-    if (tag.has_value() || isExtern) error(peek(), "'enum' cannot be preceded by a tag or 'extern'");
-    stmt = parseEnumDecl(isExport);
+    if (tag.has_value()) error(peek(), "'enum' cannot be preceded by a tag");
+    stmt = parseEnumDecl(isExport, isExtern);
   } else if (check(TokenKind::KwStruct)) {
-    if (tag.has_value() || isExtern) error(peek(), "'struct' cannot be preceded by a tag or 'extern'");
-    stmt = parseStructDecl(isExport);
+    if (tag.has_value()) error(peek(), "'struct' cannot be preceded by a tag");
+    stmt = parseStructDecl(isExport, isExtern);
   } else if (check(TokenKind::KwLet) || check(TokenKind::KwConst)) {
     if (tag.has_value()) error(peek(), "Variable declarations cannot be preceded by a tag");
     stmt = parseVarDecl(isExport, isExtern, isEntityLocal);

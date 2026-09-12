@@ -22,7 +22,14 @@ class Compiler {
   friend class TypeHandler;
 
 public:
-  Compiler(const std::string_view &source, const std::string &datapackNamespace, std::filesystem::path currentDir = ".");
+  Compiler(
+    const std::string_view &source,
+    const std::string &datapackNamespace,
+    std::filesystem::path currentDir = ".",
+    std::optional<std::filesystem::path> projectRoot = std::nullopt,
+    bool headerOnly = false,
+    std::vector<std::string> depChain = {}
+  );
   ~Compiler();
 
   struct CompiledFunction {
@@ -30,6 +37,7 @@ public:
     std::string data;
     std::optional<std::string> tag;
     bool internal = true;
+    std::string ns;
   };
 
   std::vector<CompiledFunction> compile();
@@ -61,6 +69,9 @@ public:
     std::unordered_map<std::string, EnumVariant> variants;
 
     bool exported = false;
+    bool isExtern = false;
+
+    uint64_t uid = 0;
   };
 
   struct StructData;
@@ -111,7 +122,13 @@ public:
     Type &operator=(Type &&) noexcept = default;
 
     bool operator==(const Type &o) const {
-      if (kind != o.kind || enumRef != o.enumRef || structRef != o.structRef) return false;
+      if (kind != o.kind) return false;
+      if (enumRef != o.enumRef) {
+        if (!enumRef || !o.enumRef || enumRef->uid == 0 || enumRef->uid != o.enumRef->uid) return false;
+      }
+      if (structRef != o.structRef) {
+        if (!structRef || !o.structRef || structRef->uid == 0 || structRef->uid != o.structRef->uid) return false;
+      }
       if (baseType && o.baseType) {
         if (*baseType != *o.baseType) return false;
       } else if (baseType != o.baseType) {
@@ -174,7 +191,10 @@ public:
     std::string name;
     std::vector<StructField> fields;
     bool exported = false;
+    bool isExtern = false;
     bool hasConstructor = false;
+
+    uint64_t uid = 0;
   };
 
   struct FunctionData {
@@ -186,6 +206,8 @@ public:
 
     bool exported = false;
     bool internal = true;
+    bool isExtern = false;
+    std::string emitNamespace;
 
     const StructData *ownerStruct = nullptr;
     bool isStatic = false;
@@ -202,6 +224,8 @@ public:
 
     bool constant = false;
     bool exported = false;
+    bool isExtern = false;
+    std::string emitNamespace;
 
     bool isEntityLocal = false;
     std::string entityLocalDefaultLiteral;
@@ -246,6 +270,9 @@ private:
   const std::string datapackNamespace;
   const std::string source;
   const std::filesystem::path currentDir;
+  const std::filesystem::path projectRoot;
+  const bool headerOnly;
+  const std::vector<std::string> depChain;
 
   std::unique_ptr<Block> program;
 
@@ -279,11 +306,14 @@ private:
   void runRecoverable(const Stmt &stmt, const std::function<void()> &fn);
 
   void processDeclarations(const Block &block);
+  void processHeaderOnlyVarDecls(const Block &block);
   void processCompilation(const Block &block);
   void processStructDecl(const StructDeclStmt &decl, SourceLoc loc);
   void processEnumDecl(const EnumDeclStmt &decl, SourceLoc loc);
   void processFuncDeclDeclaration(const FuncDeclStmt &decl, SourceLoc loc);
   void processImportDecl(const ImportStmt &decl, SourceLoc loc);
+  void processDependencyImportDecl(const ImportStmt &decl, SourceLoc loc);
+  bool depShouldEmbed(const std::string &depName) const;
   void compileFuncDecl(const FuncDeclStmt &decl, SourceLoc loc);
   void compileStructDecl(const StructDeclStmt &decl, SourceLoc loc);
   void compileStructMethod(const StructData &structData, const StructMethodDecl &methodDecl, const FunctionData &funcData);
@@ -372,6 +402,8 @@ public:
   static constexpr const char *setupScoreboards = "scoreboard objectives add vars dummy\n"
                                                   "scoreboard objectives add temp dummy\n"
                                                   "scoreboard players set invert temp -1\n";
+
+  static constexpr const char *callStackNamespace = "loom_call_stack";
 
   std::optional<VariableData> lookupVariable(const std::string &name) const;
 

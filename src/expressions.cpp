@@ -49,14 +49,18 @@ Compiler::ExpressionData Compiler::compileExpression(const Expr &node, unsigned 
 
         if (innerType.isString() || innerType.isList() || innerType.isMap() || innerType.isStruct()) {
           return {
-            .data = std::format("data modify storage {0}:global expr_str{1} set from storage {0}:global vars.{2}", datapackNamespace, id, targetVar->getStorageName()),
+            .data = std::format(
+              "data modify storage {0}:global expr_str{1} set from storage {2}:global vars.{3}", datapackNamespace, id, targetVar->emitNamespace, targetVar->getStorageName()
+            ),
             .precomputed = false,
             .type = innerType
           };
         }
         if (innerType.isFloat()) {
           return {
-            .data = std::format("data modify storage {0}:global expr_float{1} set from storage {0}:global vars.{2}", datapackNamespace, id, targetVar->getStorageName()),
+            .data = std::format(
+              "data modify storage {0}:global expr_float{1} set from storage {2}:global vars.{3}", datapackNamespace, id, targetVar->emitNamespace, targetVar->getStorageName()
+            ),
             .precomputed = false,
             .type = innerType
           };
@@ -205,7 +209,7 @@ Compiler::ExpressionData Compiler::compileFunctionInvocation(
   std::string argPushData = "";
 
   if (implicitSelf.has_value()) {
-    argPushData += std::format("data modify storage {}:stack regs append value {}\n", datapackNamespace, implicitSelf->data);
+    argPushData += std::format("data modify storage {}:stack regs append value {}\n", callStackNamespace, implicitSelf->data);
   }
 
   for (size_t i = 0; i < compiledArgs.size(); i++) {
@@ -245,7 +249,7 @@ Compiler::ExpressionData Compiler::compileFunctionInvocation(
                   "data modify storage {}:global expr_str{} set from storage {}:global vars.{}_refargs.refname",
                   datapackNamespace,
                   id,
-                  datapackNamespace,
+                  varIt->second.emitNamespace,
                   varIt->second.mangledName
                 ),
                 .precomputed = false,
@@ -261,19 +265,20 @@ Compiler::ExpressionData Compiler::compileFunctionInvocation(
     }
 
     if (argExpr.precomputed) {
-      argPushData += std::format("data modify storage {}:stack regs append value {}\n", datapackNamespace, argExpr.data);
+      argPushData += std::format("data modify storage {}:stack regs append value {}\n", callStackNamespace, argExpr.data);
     } else {
       argPushData += argExpr.data + "\n";
       if (argExpr.type.isString() || argExpr.type.isList() || argExpr.type.isMap() || argExpr.type.isRef()) {
-        argPushData += std::format("data modify storage {}:stack regs append from storage {}:global expr_str{}\n", datapackNamespace, datapackNamespace, id);
+        argPushData += std::format("data modify storage {}:stack regs append from storage {}:global expr_str{}\n", callStackNamespace, datapackNamespace, id);
       } else if (argExpr.type.isFloat()) {
-        argPushData += std::format("data modify storage {}:stack regs append from storage {}:global expr_float{}\n", datapackNamespace, datapackNamespace, id);
+        argPushData += std::format("data modify storage {}:stack regs append from storage {}:global expr_float{}\n", callStackNamespace, datapackNamespace, id);
       } else {
         argPushData += std::format(
           "execute store result storage {0}:global stack_temp int 1 run scoreboard players get expr_output1 temp\ndata modify storage "
-          "{0}:stack regs append from storage "
+          "{1}:stack regs append from storage "
           "{0}:global stack_temp\n",
-          datapackNamespace
+          datapackNamespace,
+          callStackNamespace
         );
       }
     }
@@ -309,12 +314,12 @@ Compiler::ExpressionData Compiler::compileFunctionInvocation(
     callCommand = std::format(
       "execute store result score expr_output{} temp run function {}:{}{}",
       id,
-      datapackNamespace,
+      selectedOverload->emitNamespace,
       selectedOverload->internal ? "internal/" : "",
       selectedOverload->mangledName
     );
   } else {
-    callCommand = std::format("function {}:{}{}", datapackNamespace, selectedOverload->internal ? "internal/" : "", selectedOverload->mangledName);
+    callCommand = std::format("function {}:{}{}", selectedOverload->emitNamespace, selectedOverload->internal ? "internal/" : "", selectedOverload->mangledName);
   }
 
   std::string captureReturn = "";
@@ -880,7 +885,7 @@ Compiler::ExpressionData Compiler::compileExpressionImpl(const Expr &node, unsig
         if (actualType.isString() || actualType.isList() || actualType.isMap() || actualType.isStruct()) {
           return {
             .data =
-              std::format("data modify storage {}:global expr_str{} set from storage {}:global vars.{}", datapackNamespace, id, datapackNamespace, varData.getStorageName()),
+              std::format("data modify storage {}:global expr_str{} set from storage {}:global vars.{}", datapackNamespace, id, varData.emitNamespace, varData.getStorageName()),
             .precomputed = false,
             .type = actualType
           };
@@ -888,8 +893,9 @@ Compiler::ExpressionData Compiler::compileExpressionImpl(const Expr &node, unsig
 
         if (actualType.isFloat()) {
           return {
-            .data =
-              std::format("data modify storage {}:global expr_float{} set from storage {}:global vars.{}", datapackNamespace, id, datapackNamespace, varData.getStorageName()),
+            .data = std::format(
+              "data modify storage {}:global expr_float{} set from storage {}:global vars.{}", datapackNamespace, id, varData.emitNamespace, varData.getStorageName()
+            ),
             .precomputed = false,
             .type = actualType
           };

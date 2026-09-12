@@ -1,7 +1,9 @@
 #include "lspNav.hpp"
 #include "lexer.hpp"
+#include "loomConfig.hpp"
 #include "parser.hpp"
 
+#include <filesystem>
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
@@ -44,18 +46,22 @@ struct GlobalIndex {
   std::unordered_map<std::string, std::vector<Tagged<FuncDeclStmt>>> funcs;
   std::unordered_map<std::string, Tagged<StructDeclStmt>> structs;
   std::unordered_map<std::string, Tagged<EnumDeclStmt>> enums;
+  std::unordered_map<std::string, Tagged<VarDeclStmt>> vars;
   std::unordered_map<std::string, const NamespaceStmt *> namespaces;
 };
+
+enum class FilterMode { All, ExportOnly, ExternOnly };
 
 void indexBlock(
   const Block &block,
   const std::string &file,
   const std::string &fileDir,
+  const std::string &projectRoot,
   std::vector<std::string> &nsPath,
   GlobalIndex &idx,
   const ImportLoader &loader,
   std::unordered_set<std::string> &visitedFiles,
-  bool onlyExported
+  FilterMode filter
 ) {
   std::string prefix;
   for (const auto &p : nsPath) prefix += p + "::";
@@ -65,26 +71,42 @@ void indexBlock(
       [&](auto &&n) {
         using T = std::decay_t<decltype(n)>;
         if constexpr (std::is_same_v<T, FuncDeclStmt>) {
-          if (onlyExported && !n.isExport) return;
+          if (filter == FilterMode::ExportOnly && !n.isExport) return;
+          if (filter == FilterMode::ExternOnly && !n.isExtern) return;
           idx.funcs[prefix + n.name].push_back({&n, file});
           if (!prefix.empty()) idx.funcs[n.name].push_back({&n, file});
         } else if constexpr (std::is_same_v<T, StructDeclStmt>) {
-          if (onlyExported && !n.isExport) return;
+          if (filter == FilterMode::ExportOnly && !n.isExport) return;
+          if (filter == FilterMode::ExternOnly && !n.isExtern) return;
           idx.structs.emplace(prefix + n.name, Tagged<StructDeclStmt>{&n, file});
           if (!prefix.empty()) idx.structs.emplace(n.name, Tagged<StructDeclStmt>{&n, file});
         } else if constexpr (std::is_same_v<T, EnumDeclStmt>) {
-          if (onlyExported && !n.isExport) return;
+          if (filter == FilterMode::ExportOnly && !n.isExport) return;
+          if (filter == FilterMode::ExternOnly && !n.isExtern) return;
           idx.enums.emplace(prefix + n.name, Tagged<EnumDeclStmt>{&n, file});
           if (!prefix.empty()) idx.enums.emplace(n.name, Tagged<EnumDeclStmt>{&n, file});
+        } else if constexpr (std::is_same_v<T, VarDeclStmt>) {
+          if (filter == FilterMode::ExportOnly && !n.isExport) return;
+          if (filter == FilterMode::ExternOnly && !n.isExtern) return;
+          idx.vars.emplace(prefix + n.name, Tagged<VarDeclStmt>{&n, file});
+          if (!prefix.empty()) idx.vars.emplace(n.name, Tagged<VarDeclStmt>{&n, file});
         } else if constexpr (std::is_same_v<T, NamespaceStmt>) {
           idx.namespaces[prefix + n.name] = &n;
           nsPath.push_back(n.name);
-          indexBlock(*n.body, file, fileDir, nsPath, idx, loader, visitedFiles, onlyExported);
+          indexBlock(*n.body, file, fileDir, projectRoot, nsPath, idx, loader, visitedFiles, filter);
           nsPath.pop_back();
         } else if constexpr (std::is_same_v<T, ImportStmt>) {
           if (!loader) return;
+
+          std::string loadPath = n.path;
+          std::string loadFromDir = fileDir;
+          if (n.isDependency) {
+            loadPath = (std::filesystem::path(projectRoot) / "deps" / n.path / "main.loom").string();
+            loadFromDir = "";
+          }
+
           std::string resolvedPath;
-          const Block *importedBlock = loader(n.path, fileDir, resolvedPath);
+          const Block *importedBlock = loader(loadPath, loadFromDir, resolvedPath);
           if (!importedBlock || resolvedPath.empty() || visitedFiles.contains(resolvedPath)) return;
           visitedFiles.insert(resolvedPath);
 
@@ -93,14 +115,16 @@ void indexBlock(
 
           GlobalIndex subIdx;
           std::vector<std::string> subNsPath;
-          indexBlock(*importedBlock, resolvedPath, importedDir, subNsPath, subIdx, loader, visitedFiles, /*onlyExported=*/true);
+          FilterMode subFilter = n.isDependency ? FilterMode::ExternOnly : FilterMode::ExportOnly;
+          indexBlock(*importedBlock, resolvedPath, importedDir, projectRoot, subNsPath, subIdx, loader, visitedFiles, subFilter);
 
-          std::string aliasPrefix = n.alias ? (*n.alias + "::") : "";
+          std::string aliasPrefix = n.alias ? (*n.alias + "::") : (n.isDependency ? (n.path + "::") : "");
           for (auto &[name, overloads] : subIdx.funcs) {
             for (auto &ref : overloads) idx.funcs[aliasPrefix + name].push_back(ref);
           }
           for (auto &[name, ref] : subIdx.structs) idx.structs.emplace(aliasPrefix + name, ref);
           for (auto &[name, ref] : subIdx.enums) idx.enums.emplace(aliasPrefix + name, ref);
+          for (auto &[name, ref] : subIdx.vars) idx.vars.emplace(aliasPrefix + name, ref);
         }
       },
       stmtPtr->data
@@ -112,7 +136,7 @@ GlobalIndex buildIndex(const Block &program, const std::string &fromDir, const I
   GlobalIndex idx;
   std::vector<std::string> nsPath;
   std::unordered_set<std::string> visited;
-  indexBlock(program, "", fromDir, nsPath, idx, loader, visited, /*onlyExported=*/false);
+  indexBlock(program, "", fromDir, /*projectRoot=*/fromDir, nsPath, idx, loader, visited, FilterMode::All);
   return idx;
 }
 
@@ -153,15 +177,16 @@ struct WalkCtx {
 };
 
 struct VarResolution {
-  enum class Kind { None, Param, ForIter, VarDecl, ImplicitThis, ImplicitField, ImplicitMethod } kind = Kind::None;
+  enum class Kind { None, Param, ForIter, VarDecl, ImplicitThis, ImplicitField, ImplicitMethod, GlobalVar } kind = Kind::None;
   const Param *param = nullptr;
   SourceLoc forIterLoc;
   const VarDeclStmt *varDecl = nullptr;
   const StructFieldDecl *field = nullptr;
   const StructMethodDecl *method = nullptr;
+  const Tagged<VarDeclStmt> *globalVar = nullptr;
 };
 
-VarResolution resolveVar(const WalkCtx &ctx, const std::string &name) {
+VarResolution resolveVar(const WalkCtx &ctx, const GlobalIndex &idx, const std::string &name) {
   for (auto it = ctx.params.rbegin(); it != ctx.params.rend(); ++it) {
     if ((*it)->name == name) return {.kind = VarResolution::Kind::Param, .param = *it};
   }
@@ -180,11 +205,12 @@ VarResolution resolveVar(const WalkCtx &ctx, const std::string &name) {
     if (const StructFieldDecl *f = findField(*ctx.structCtx, name)) return {.kind = VarResolution::Kind::ImplicitField, .field = f};
     if (const StructMethodDecl *m = findMethod(*ctx.structCtx, name)) return {.kind = VarResolution::Kind::ImplicitMethod, .method = m};
   }
+  if (auto it = idx.vars.find(name); it != idx.vars.end()) return {.kind = VarResolution::Kind::GlobalVar, .globalVar = &it->second};
   return {};
 }
 
-std::optional<std::string> declaredTypeOf(const WalkCtx &ctx, const std::string &name) {
-  VarResolution r = resolveVar(ctx, name);
+std::optional<std::string> declaredTypeOf(const WalkCtx &ctx, const GlobalIndex &idx, const std::string &name) {
+  VarResolution r = resolveVar(ctx, idx, name);
   switch (r.kind) {
   case VarResolution::Kind::Param:
     return baseTypeName(r.param->typeText);
@@ -197,6 +223,9 @@ std::optional<std::string> declaredTypeOf(const WalkCtx &ctx, const std::string 
     return ctx.structCtx->name;
   case VarResolution::Kind::ImplicitField:
     return baseTypeName(r.field->typeText);
+  case VarResolution::Kind::GlobalVar:
+    if (r.globalVar->decl->typeText) return baseTypeName(*r.globalVar->decl->typeText);
+    return std::nullopt;
   default:
     return std::nullopt;
   }
@@ -208,8 +237,8 @@ struct Resolved {
   std::string hover;
 };
 
-std::optional<Resolved> resolveVarHover(const WalkCtx &ctx, const std::string &name) {
-  VarResolution r = resolveVar(ctx, name);
+std::optional<Resolved> resolveVarHover(const WalkCtx &ctx, const GlobalIndex &idx, const std::string &name) {
+  VarResolution r = resolveVar(ctx, idx, name);
   switch (r.kind) {
   case VarResolution::Kind::Param:
     return Resolved{.targetLoc = r.param->loc, .hover = wrap("(parameter) " + r.param->name + ": " + r.param->typeText)};
@@ -227,6 +256,13 @@ std::optional<Resolved> resolveVarHover(const WalkCtx &ctx, const std::string &n
   case VarResolution::Kind::ImplicitField: {
     const StructFieldDecl &f = *r.field;
     return Resolved{.targetLoc = f.nameLoc, .hover = wrap("(struct field, implicit self) " + ctx.structCtx->name + "." + f.name + ": " + f.typeText)};
+  }
+  case VarResolution::Kind::GlobalVar: {
+    const VarDeclStmt &vd = *r.globalVar->decl;
+    std::string kw = vd.isConst ? "const" : "let";
+    std::string modifiers = std::string(vd.isExtern ? "extern " : "") + (vd.isEntityLocal ? "@entity " : "");
+    std::string ty = vd.typeText ? *vd.typeText : "(inferred)";
+    return Resolved{.targetLoc = vd.nameLoc, .file = r.globalVar->file, .hover = wrap(modifiers + kw + " " + vd.name + ": " + ty)};
   }
   case VarResolution::Kind::ImplicitMethod: {
     const StructMethodDecl &m = *r.method;
@@ -255,7 +291,6 @@ std::optional<Resolved> resolveCallName(const WalkCtx &ctx, const GlobalIndex &i
         return Resolved{.targetLoc = m->nameLoc, .file = s->file, .hover = wrap(kind + " " + s->decl->name + "::" + m->name + "(" + formatParams(m->params) + ")" + ret)};
       }
     }
-    return std::nullopt;
   }
 
   if (ctx.structCtx) {
@@ -285,7 +320,7 @@ std::optional<std::string> staticTypeOf(const WalkCtx &ctx, const GlobalIndex &i
     [&](auto &&n) -> std::optional<std::string> {
       using T = std::decay_t<decltype(n)>;
       if constexpr (std::is_same_v<T, VarRefExpr>) {
-        return declaredTypeOf(ctx, n.name);
+        return declaredTypeOf(ctx, idx, n.name);
       } else if constexpr (std::is_same_v<T, MemberExpr>) {
         auto objTy = staticTypeOf(ctx, idx, *n.object);
         if (!objTy) return std::nullopt;
@@ -418,13 +453,13 @@ bool walkStmt(const Stmt &stmt, WalkCtx ctx, const GlobalIndex &idx, uint32_t of
         return walkExpr(*n.value, ctx, idx, offset, out);
       } else if constexpr (std::is_same_v<T, AssignStmt>) {
         if (inSpan(n.nameLoc, offset)) {
-          if (auto r = resolveVarHover(ctx, n.name)) {
+          if (auto r = resolveVarHover(ctx, idx, n.name)) {
             out = r;
             return true;
           }
         }
 
-        std::optional<std::string> curTy = declaredTypeOf(ctx, n.name);
+        std::optional<std::string> curTy = declaredTypeOf(ctx, idx, n.name);
         for (const auto &pc : n.path) {
           if (!pc.isIndex) {
             if (curTy) {
@@ -623,7 +658,7 @@ bool walkExpr(const Expr &expr, WalkCtx &ctx, const GlobalIndex &idx, uint32_t o
         return false;
       } else if constexpr (std::is_same_v<T, VarRefExpr>) {
         if (inSpan(expr.loc, offset)) {
-          if (auto r = resolveVarHover(ctx, n.name)) {
+          if (auto r = resolveVarHover(ctx, idx, n.name)) {
             out = r;
             return true;
           }
@@ -671,6 +706,7 @@ std::string semanticKindFor(const VarResolution &r) {
   case VarResolution::Kind::ForIter:
   case VarResolution::Kind::VarDecl:
   case VarResolution::Kind::ImplicitThis:
+  case VarResolution::Kind::GlobalVar:
     return "variable";
   case VarResolution::Kind::ImplicitField:
     return "property";
@@ -736,7 +772,7 @@ void collectExprTokens(const Expr &expr, const WalkCtx &ctx, const GlobalIndex &
         for (const auto &a : n.arguments) collectExprTokens(*a, ctx, idx, out);
         out.push_back(SemanticToken{.loc = n.methodLoc, .kind = "method"});
       } else if constexpr (std::is_same_v<T, VarRefExpr>) {
-        VarResolution r = resolveVar(ctx, n.name);
+        VarResolution r = resolveVar(ctx, idx, n.name);
         std::string kind = semanticKindFor(r);
         if (kind.empty()) {
           if (lookupStruct(idx, n.name)) kind = "struct";
@@ -786,10 +822,10 @@ void collectStmtTokens(const Stmt &stmt, WalkCtx ctx, const GlobalIndex &idx, st
         if (n.typeText) addTypeToken(idx, *n.typeText, n.typeLoc, out);
         collectExprTokens(*n.value, ctx, idx, out);
       } else if constexpr (std::is_same_v<T, AssignStmt>) {
-        VarResolution r = resolveVar(ctx, n.name);
+        VarResolution r = resolveVar(ctx, idx, n.name);
         std::string kind = semanticKindFor(r);
         if (!kind.empty()) out.push_back(SemanticToken{.loc = n.nameLoc, .kind = kind});
-        std::optional<std::string> curTy = declaredTypeOf(ctx, n.name);
+        std::optional<std::string> curTy = declaredTypeOf(ctx, idx, n.name);
         for (const auto &pc : n.path) {
           if (!pc.isIndex) {
             out.push_back(SemanticToken{.loc = pc.loc, .kind = "property"});
@@ -928,7 +964,7 @@ const char *EXPRESSION_KEYWORDS[] = {"true", "false", "at"};
 
 const char *PRIMITIVE_TYPES[] = {"int", "float", "bool", "string"};
 
-enum class CompletionContext { Name, Type, MemberAccess, ScopeAccess, Expression };
+enum class CompletionContext { Name, Type, MemberAccess, ScopeAccess, ImportPath, Expression };
 
 struct PositionAnalysis {
   CompletionContext ctx = CompletionContext::Expression;
@@ -1043,6 +1079,9 @@ PositionAnalysis analyzePosition(const std::string &text, uint32_t offset) {
   case TokenKind::KwAs:
   case TokenKind::KwFor:
     result.ctx = CompletionContext::Name;
+    return result;
+  case TokenKind::KwImport:
+    result.ctx = CompletionContext::ImportPath;
     return result;
   default:
     break;
@@ -1220,6 +1259,28 @@ std::vector<CompletionEntry> completionItems(const Block &program, const std::st
 
   if (pos.ctx == CompletionContext::Name) return items;
 
+  if (pos.ctx == CompletionContext::ImportPath) {
+    std::unordered_set<std::string> seen;
+
+    std::error_code ec;
+    std::filesystem::path depsDir = std::filesystem::path(fromDir) / "deps";
+    if (std::filesystem::is_directory(depsDir, ec)) {
+      for (const auto &entry : std::filesystem::directory_iterator(depsDir, ec)) {
+        if (!entry.is_directory()) continue;
+        std::string name = entry.path().filename().string();
+        if (!seen.insert(name).second) continue;
+        items.push_back(CompletionEntry{.label = name, .kind = "module", .detail = "dependency (installed)"});
+      }
+    }
+
+    for (const auto &[name, cfg] : readDepsConfig(std::filesystem::path(fromDir) / "loom.yml")) {
+      if (!cfg.source.has_value() || !seen.insert(name).second) continue;
+      items.push_back(CompletionEntry{.label = name, .kind = "module", .detail = "dependency (not installed — run `loom install`)"});
+    }
+
+    return items;
+  }
+
   GlobalIndex idx = buildIndex(program, fromDir, loader);
 
   if (pos.ctx == CompletionContext::Type) {
@@ -1237,7 +1298,7 @@ std::vector<CompletionEntry> completionItems(const Block &program, const std::st
 
     std::optional<std::string> curType;
     if (base == "this" && scope.hasImplicitThis) curType = scope.structCtx->name;
-    else curType = declaredTypeOf(scope, base);
+    else curType = declaredTypeOf(scope, idx, base);
 
     if (!curType) {
       if (pos.chain.size() == 1) {
@@ -1287,6 +1348,9 @@ std::vector<CompletionEntry> completionItems(const Block &program, const std::st
               items.push_back(CompletionEntry{.label = n.name, .kind = "struct", .detail = "struct"});
             } else if constexpr (std::is_same_v<T, EnumDeclStmt>) {
               items.push_back(CompletionEntry{.label = n.name, .kind = "enum", .detail = "enum"});
+            } else if constexpr (std::is_same_v<T, VarDeclStmt>) {
+              std::string ty = n.typeText ? *n.typeText : "(inferred)";
+              items.push_back(CompletionEntry{.label = n.name, .kind = "variable", .detail = ": " + ty});
             } else if constexpr (std::is_same_v<T, NamespaceStmt>) {
               items.push_back(CompletionEntry{.label = n.name, .kind = "namespace", .detail = "namespace"});
             }
@@ -1297,7 +1361,29 @@ std::vector<CompletionEntry> completionItems(const Block &program, const std::st
       return items;
     }
 
-    if (const Tagged<StructDeclStmt> *s = lookupStruct(idx, joined)) addFieldsAndMethods(*s->decl, /*showPrivate=*/false, /*includeStatic=*/true, items);
+    if (const Tagged<StructDeclStmt> *s = lookupStruct(idx, joined)) {
+      addFieldsAndMethods(*s->decl, /*showPrivate=*/false, /*includeStatic=*/true, items);
+      return items;
+    }
+
+    std::string dotPrefix = joined + "::";
+    for (const auto &[name, overloads] : idx.funcs) {
+      if (!name.starts_with(dotPrefix) || overloads.empty()) continue;
+      const FuncDeclStmt &f = *overloads.front().decl;
+      std::string ret = f.returnTypeText ? (": " + *f.returnTypeText) : "";
+      items.push_back(CompletionEntry{.label = name.substr(dotPrefix.size()), .kind = "function", .detail = "(" + formatParams(f.params) + ")" + ret});
+    }
+    for (const auto &[name, s] : idx.structs) {
+      if (name.starts_with(dotPrefix)) items.push_back(CompletionEntry{.label = name.substr(dotPrefix.size()), .kind = "struct", .detail = "struct"});
+    }
+    for (const auto &[name, e] : idx.enums) {
+      if (name.starts_with(dotPrefix)) items.push_back(CompletionEntry{.label = name.substr(dotPrefix.size()), .kind = "enum", .detail = "enum"});
+    }
+    for (const auto &[name, v] : idx.vars) {
+      if (!name.starts_with(dotPrefix)) continue;
+      std::string ty = v.decl->typeText ? *v.decl->typeText : "(inferred)";
+      items.push_back(CompletionEntry{.label = name.substr(dotPrefix.size()), .kind = "variable", .detail = ": " + ty});
+    }
     return items;
   }
 
@@ -1321,6 +1407,10 @@ std::vector<CompletionEntry> completionItems(const Block &program, const std::st
   }
   for (const auto &[name, s] : idx.structs) items.push_back(CompletionEntry{.label = name, .kind = "struct", .detail = "struct"});
   for (const auto &[name, e] : idx.enums) items.push_back(CompletionEntry{.label = name, .kind = "enum", .detail = "enum"});
+  for (const auto &[name, v] : idx.vars) {
+    std::string ty = v.decl->typeText ? *v.decl->typeText : "(inferred)";
+    items.push_back(CompletionEntry{.label = name, .kind = "variable", .detail = ": " + ty});
+  }
   for (const auto &[name, ns] : idx.namespaces) items.push_back(CompletionEntry{.label = name, .kind = "namespace", .detail = "namespace"});
 
   return items;

@@ -1,0 +1,4 @@
+namespace: "dep_embed_test"
+deps:
+  example_lib:
+    embed: true

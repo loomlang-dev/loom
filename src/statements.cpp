@@ -446,7 +446,7 @@ std::string Compiler::compileBlock(const Block &block) {
 
           if (expr.precomputed) {
             if (actualType.isString() || actualType.isFloat() || actualType.isList() || actualType.isMap() || actualType.isStruct()) {
-              ret += std::format("data modify storage {0}:global vars.{1} set value {2}\n", datapackNamespace, varData.getStorageName(), expr.data);
+              ret += std::format("data modify storage {0}:global vars.{1} set value {2}\n", varData.emitNamespace, varData.getStorageName(), expr.data);
             } else {
               ret += std::format("scoreboard players set {} vars {}\n", varData.getStorageName(), expr.data);
             }
@@ -478,14 +478,20 @@ std::string Compiler::compileBlock(const Block &block) {
 
             if (!usedCompoundOp) {
               if (actualType.isString() || actualType.isList() || actualType.isMap() || actualType.isStruct()) {
-                ret +=
-                  std::format("{0}\ndata modify storage {1}:global vars.{2} set from storage {1}:global expr_str1\n", expr.data, datapackNamespace, varData.getStorageName());
+                ret += std::format(
+                  "{0}\ndata modify storage {1}:global vars.{2} set from storage {3}:global expr_str1\n",
+                  expr.data,
+                  varData.emitNamespace,
+                  varData.getStorageName(),
+                  datapackNamespace
+                );
               } else if (actualType.isFloat()) {
                 ret += std::format(
-                  "{0}\ndata modify storage {1}:global vars.{2} set from storage {1}:global expr_float1\n",
+                  "{0}\ndata modify storage {1}:global vars.{2} set from storage {3}:global expr_float1\n",
                   expr.data,
-                  datapackNamespace,
-                  varData.getStorageName()
+                  varData.emitNamespace,
+                  varData.getStorageName(),
+                  datapackNamespace
                 );
               } else {
                 ret += std::format("{}\nscoreboard players operation {} vars = expr_output1 temp\n", expr.data, varData.getStorageName());

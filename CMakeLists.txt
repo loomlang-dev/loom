@@ -11,6 +11,8 @@ add_executable(loom ${LOOM_SOURCES})
 cl_add_dep(loom lyra)
 cl_add_dep(loom nlohmann_json)
 cl_add_dep(loom rapidyaml)
+cl_add_dep(loom libcurl)
+cl_add_dep(loom libarchive)
 
 install(TARGETS loom RUNTIME DESTINATION bin)
 

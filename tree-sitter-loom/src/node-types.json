@@ -1523,6 +1523,10 @@
         "required": true,
         "types": [
           {
+            "type": "identifier",
+            "named": true
+          },
+          {
             "type": "path",
             "named": true
           }

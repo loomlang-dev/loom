@@ -232,6 +232,7 @@ struct StructMethodDecl {
 
 struct StructDeclStmt {
   bool isExport = false;
+  bool isExtern = false;
   std::string name;
   SourceLoc nameLoc;
   std::vector<StructFieldDecl> fields;
@@ -245,6 +246,7 @@ struct EnumVariantDecl {
 };
 struct EnumDeclStmt {
   bool isExport = false;
+  bool isExtern = false;
   std::string name;
   SourceLoc nameLoc;
   std::vector<EnumVariantDecl> variants;
@@ -259,6 +261,7 @@ struct NamespaceStmt {
 struct ImportStmt {
   std::string path;
   std::optional<std::string> alias;
+  bool isDependency = false;
 };
 
 struct ReturnStmt {

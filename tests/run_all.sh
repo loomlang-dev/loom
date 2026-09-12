@@ -54,6 +54,56 @@ for f in "$TEST_DIR"/*.loom; do
   echo "PASS: $name"
 done
 
+PROJECTS_DIR="$TEST_DIR/projects"
+for d in "$PROJECTS_DIR"/*/; do
+  [ -d "$d" ] || continue
+  name=$(basename "$d")
+  echo "=== Running project test: $name ==="
+  od="$OUTDIR/$name"
+  rm -rf "$od"
+  mkdir -p "$od"
+
+  echo "Compiling $d/main.loom -> $od"
+  "$LOOM_EXEC" "$d/main.loom" -b "$d" -o "$od"
+  rc=$?
+  if [ $rc -ne 0 ]; then
+    echo "FAIL: $name (compiler exited $rc)"
+    failures=$((failures+1))
+    continue
+  fi
+
+  if [ ! -f "$od/pack.mcmeta" ]; then
+    echo "FAIL: $name missing pack.mcmeta"
+    failures=$((failures+1))
+    continue
+  fi
+
+  if ! find "$od/data" -type f -name '*.mcfunction' | grep -q .; then
+    echo "FAIL: $name produced no mcfunction files"
+    failures=$((failures+1))
+    continue
+  fi
+
+  if [ "$name" = "dep_normal" ] && [ -d "$od/data/example_lib" ]; then
+    echo "FAIL: $name should not emit a data/example_lib folder (dependency wasn't embedded)"
+    failures=$((failures+1))
+    continue
+  fi
+
+  if [ "$name" = "dep_embed" ] && [ ! -d "$od/data/example_lib" ]; then
+    echo "FAIL: $name should emit a data/example_lib folder (dependency was embedded)"
+    failures=$((failures+1))
+    continue
+  fi
+
+  echo "PASS: $name"
+done
+
+echo "=== Running test: deps_fetch ==="
+if ! LOOM_EXEC="$LOOM_EXEC" "$TEST_DIR/deps_fetch/run.sh"; then
+  failures=$((failures+1))
+fi
+
 if [ $failures -ne 0 ]; then
   echo "$failures tests failed"
   exit 1

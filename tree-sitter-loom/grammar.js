@@ -30,6 +30,7 @@ module.exports = grammar({
     [$.selector],
     [$.namespaced_identifier, $.namespaced_arg],
     [$.struct_field, $.struct_method],
+    [$.enum_definition, $.struct_definition, $._modifier],
   ],
 
   rules: {
@@ -62,7 +63,7 @@ module.exports = grammar({
     import_statement: ($) =>
       seq(
         "import",
-        field("path", $.path),
+        field("path", choice($.path, $.identifier)),
         optional(seq("as", field("alias", $.identifier))),
       ),
 
@@ -71,6 +72,7 @@ module.exports = grammar({
     enum_definition: ($) =>
       seq(
         optional("export"),
+        optional("extern"),
         "enum",
         field("name", $.identifier),
         "{",
@@ -94,6 +96,7 @@ module.exports = grammar({
     struct_definition: ($) =>
       seq(
         optional("export"),
+        optional("extern"),
         "struct",
         field("name", $.identifier),
         "{",

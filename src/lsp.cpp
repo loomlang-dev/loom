@@ -160,6 +160,7 @@ int completionKindFor(const std::string &kind) {
   if (kind == "field") return 5;
   if (kind == "method") return 2;
   if (kind == "namespace") return 9;
+  if (kind == "module") return 9;
   return 6; // variable
 }
 

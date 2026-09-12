@@ -12,15 +12,34 @@
 #include <vector>
 
 #include "lexer.hpp"
+#include "loomConfig.hpp"
 #include "parser.hpp"
 #include "typeHandler.hpp"
 
 #include "utils.hpp"
 
+#include <ryml.hpp>
+#include <ryml_std.hpp>
+
 std::unordered_set<std::string> Compiler::globalExternVars;
 
-Compiler::Compiler(const std::string_view &source, const std::string &datapackNamespace, std::filesystem::path currentDir)
-    : source(source), datapackNamespace(datapackNamespace), currentDir(currentDir) {
+namespace {
+uint64_t nextTypeUid() {
+  static uint64_t counter = 0;
+  return ++counter;
+}
+} // namespace
+
+Compiler::Compiler(
+  const std::string_view &source,
+  const std::string &datapackNamespace,
+  std::filesystem::path currentDir,
+  std::optional<std::filesystem::path> projectRoot,
+  bool headerOnly,
+  std::vector<std::string> depChain
+)
+    : source(source), datapackNamespace(datapackNamespace), currentDir(currentDir), projectRoot(projectRoot.value_or(currentDir)), headerOnly(headerOnly),
+      depChain(std::move(depChain)) {
   Lexer lexer(this->source);
   Parser parser(this->source, lexer.tokenize());
   parser.enableErrorRecovery();
@@ -147,13 +166,14 @@ std::string Compiler::compileVariableDeclaration(const VarDeclStmt &decl, Source
     throw std::runtime_error(formatError(loc, "Variable '" + name + "' is already defined in this scope."));
   }
 
+  std::string globalVarKey = datapackNamespace + ":" + fullVarName;
   if (isExtern) {
-    if (globalExternVars.contains(fullVarName)) {
+    if (globalExternVars.contains(globalVarKey)) {
       throw std::runtime_error(
         formatError(loc, "Extern variable '" + name + "' is already defined elsewhere. Multiple definitions of the same extern variable are not allowed.")
       );
     }
-    globalExternVars.insert(fullVarName);
+    globalExternVars.insert(globalVarKey);
   }
 
   std::optional<std::string> refTargetMangledName = std::nullopt;
@@ -174,6 +194,8 @@ std::string Compiler::compileVariableDeclaration(const VarDeclStmt &decl, Source
       .value = decl.isEntityLocal ? std::nullopt : value,
       .constant = constant,
       .exported = isExport,
+      .isExtern = isExtern,
+      .emitNamespace = datapackNamespace,
       .isEntityLocal = decl.isEntityLocal,
       .entityLocalDefaultLiteral = decl.isEntityLocal ? expr.data : "",
       .refTargetMangledName = refTargetMangledName
@@ -231,6 +253,14 @@ void Compiler::registerBuiltin(const std::string &name, BuiltinCompileCallback c
 std::vector<Compiler::CompiledFunction> Compiler::compile() {
   compiledFunctions.clear();
   internalFunctions.clear();
+
+  if (headerOnly) {
+    currentNamespacePrefix = "";
+    processDeclarations(*program);
+    currentNamespacePrefix = "";
+    processHeaderOnlyVarDecls(*program);
+    return compiledFunctions;
+  }
 
   internalFunctions.push_back(
     {.name = "internal_string_concat", .data = std::format("$data modify storage {}:global expr_str$(out_id) set value '$(left)$(right)'", datapackNamespace)}
@@ -700,6 +730,10 @@ std::vector<Compiler::CompiledFunction> Compiler::compile() {
   currentNamespacePrefix = "";
   processCompilation(*program);
 
+  for (auto &func : compiledFunctions) {
+    if (func.ns.empty()) func.ns = datapackNamespace;
+  }
+
   return compiledFunctions;
 }
 
@@ -728,13 +762,36 @@ void Compiler::processDeclarations(const Block &block) {
           processDeclarations(*node.body);
           currentNamespacePrefix = oldPrefix;
         } else if constexpr (std::is_same_v<T, ImportStmt>) {
-          runRecoverable(stmt, [&] { processImportDecl(node, stmt.loc); });
+          runRecoverable(stmt, [&] {
+            if (node.isDependency) processDependencyImportDecl(node, stmt.loc);
+            else processImportDecl(node, stmt.loc);
+          });
         } else if constexpr (std::is_same_v<T, EnumDeclStmt>) {
           runRecoverable(stmt, [&] { processEnumDecl(node, stmt.loc); });
         } else if constexpr (std::is_same_v<T, StructDeclStmt>) {
           runRecoverable(stmt, [&] { processStructDecl(node, stmt.loc); });
         } else if constexpr (std::is_same_v<T, FuncDeclStmt>) {
           runRecoverable(stmt, [&] { processFuncDeclDeclaration(node, stmt.loc); });
+        }
+      },
+      stmt.data
+    );
+  }
+}
+
+void Compiler::processHeaderOnlyVarDecls(const Block &block) {
+  for (const auto &stmtPtr : block.statements) {
+    const Stmt &stmt = *stmtPtr;
+    std::visit(
+      [&](auto &&node) {
+        using T = std::decay_t<decltype(node)>;
+        if constexpr (std::is_same_v<T, NamespaceStmt>) {
+          std::string oldPrefix = currentNamespacePrefix;
+          currentNamespacePrefix = currentNamespacePrefix.empty() ? node.name : currentNamespacePrefix + "::" + node.name;
+          processHeaderOnlyVarDecls(*node.body);
+          currentNamespacePrefix = oldPrefix;
+        } else if constexpr (std::is_same_v<T, VarDeclStmt>) {
+          runRecoverable(stmt, [&] { compileVariableDeclaration(node, stmt.loc, program.get(), true); });
         }
       },
       stmt.data
@@ -764,7 +821,7 @@ void Compiler::processImportDecl(const ImportStmt &decl, SourceLoc loc) {
   buf << f.rdbuf();
   std::string importedSource = buf.str();
 
-  importedCompilers.push_back(std::make_unique<Compiler>(importedSource, datapackNamespace, absPath.parent_path()));
+  importedCompilers.push_back(std::make_unique<Compiler>(importedSource, datapackNamespace, absPath.parent_path(), projectRoot));
   Compiler &importCompiler = *importedCompilers.back();
   std::vector<CompiledFunction> importedFuncs = importCompiler.compile();
 
@@ -853,11 +910,163 @@ void Compiler::processImportDecl(const ImportStmt &decl, SourceLoc loc) {
   }
 }
 
+bool Compiler::depShouldEmbed(const std::string &depName) const {
+  auto deps = readDepsConfig(projectRoot / "loom.yml");
+  auto it = deps.find(depName);
+  return it != deps.end() && it->second.embed;
+}
+
+void Compiler::processDependencyImportDecl(const ImportStmt &decl, SourceLoc loc) {
+  const std::string &depName = decl.path;
+
+  std::filesystem::path depDir = std::filesystem::absolute(projectRoot / "deps" / depName);
+  if (!std::filesystem::exists(depDir) || !std::filesystem::is_directory(depDir)) {
+    auto deps = readDepsConfig(projectRoot / "loom.yml");
+    auto it = deps.find(depName);
+    std::string hint = (it != deps.end() && it->second.source.has_value()) ? " Run `loom install` to fetch it." : "";
+    throw std::runtime_error(formatError(loc, "Could not find dependency '" + depName + "' (expected a directory at deps/" + depName + ")." + hint));
+  }
+
+  if (std::find(depChain.begin(), depChain.end(), depName) != depChain.end()) {
+    std::string chainStr = depChain.empty() ? depName : depChain.front();
+    for (size_t i = 1; i < depChain.size(); i++) chainStr += " -> " + depChain[i];
+    chainStr += " -> " + depName;
+    throw std::runtime_error(formatError(loc, "Circular dependency detected: " + chainStr));
+  }
+  std::vector<std::string> childDepChain = depChain;
+  childDepChain.push_back(depName);
+
+  bool isEmbedded = depShouldEmbed(depName);
+
+  std::string depNamespace = depName;
+  std::filesystem::path depConfigPath = depDir / "loom.yml";
+  if (std::filesystem::exists(depConfigPath)) {
+    std::ifstream configFile(depConfigPath, std::ios::binary);
+    std::ostringstream configBuf;
+    configBuf << configFile.rdbuf();
+    std::string configData = configBuf.str();
+
+    ryml::Tree tree = ryml::parse_in_place(ryml::to_substr(configData));
+    ryml::ConstNodeRef root = tree.rootref();
+    if (root.has_child("namespace")) root["namespace"].load(&depNamespace);
+  }
+
+  std::filesystem::path entryPath = depDir / "main.loom";
+  std::ifstream f(entryPath);
+  if (!f.is_open()) {
+    throw std::runtime_error(formatError(loc, "Dependency '" + depName + "' has no entry point (expected deps/" + depName + "/main.loom)."));
+  }
+
+  std::ostringstream buf;
+  buf << f.rdbuf();
+  std::string depSource = buf.str();
+
+  importedCompilers.push_back(std::make_unique<Compiler>(depSource, depNamespace, depDir, projectRoot, /*headerOnly=*/!isEmbedded, childDepChain));
+  Compiler &depCompiler = *importedCompilers.back();
+  std::vector<CompiledFunction> depCompiledFuncs = depCompiler.compile();
+
+  if (!depCompiler.getDiagnostics().empty()) {
+    throw std::runtime_error(formatError(loc, "Dependency '" + depName + "' failed to compile:\n" + depCompiler.getDiagnostics().front()));
+  }
+
+  std::string aliasName = decl.alias.value_or(depName);
+
+  for (const auto &[name, overloads] : depCompiler.funcs) {
+    std::string importedName = aliasName + "::" + name;
+    std::transform(importedName.begin(), importedName.end(), importedName.begin(), ::tolower);
+    for (const auto &funcData : overloads) {
+      if (!funcData.isExtern) continue;
+
+      for (const auto &existingFunc : funcs[importedName]) {
+        if (existingFunc.params == funcData.params) {
+          throw std::runtime_error(formatError(loc, "Dependency function '" + importedName + "' collides with an existing function signature."));
+        }
+      }
+
+      FunctionData localFunc = funcData;
+      localFunc.name = importedName;
+      localFunc.exported = false;
+      funcs[importedName].push_back(localFunc);
+    }
+  }
+
+  for (const auto &[name, varData] : depCompiler.vars) {
+    if (!varData.isExtern) continue;
+    std::string importedName = aliasName + "::" + name;
+    if (vars.contains(importedName)) {
+      throw std::runtime_error(formatError(loc, "Dependency variable '" + importedName + "' collides with an existing variable."));
+    }
+
+    vars[importedName] = varData;
+    vars[importedName].name = importedName;
+    vars[importedName].scope = program.get();
+    vars[importedName].exported = false;
+  }
+
+  for (const auto &[name, structData] : depCompiler.structs) {
+    if (!structData.isExtern) continue;
+    std::string importedName = aliasName + "::" + name;
+    if (structs.contains(importedName)) {
+      throw std::runtime_error(formatError(loc, "Dependency struct '" + importedName + "' collides with an existing struct."));
+    }
+
+    structs[importedName] = structData;
+    structs[importedName].name = importedName;
+    structs[importedName].exported = false;
+  }
+
+  for (const auto &[name, enumData] : depCompiler.enums) {
+    if (!enumData.isExtern) continue;
+    std::string importedName = aliasName + "::" + name;
+    if (enums.contains(importedName)) {
+      throw std::runtime_error(formatError(loc, "Dependency enum '" + importedName + "' collides with an existing enum."));
+    }
+
+    enums[importedName] = enumData;
+    enums[importedName].name = importedName;
+    enums[importedName].exported = false;
+  }
+
+  if (!isEmbedded) return;
+
+  for (const auto &func : depCompiler.internalFunctions) {
+    if (func.used) this->useInternalFunction(func.name);
+  }
+
+  for (const auto &func : depCompiledFuncs) {
+    compiledFunctions.push_back(func);
+  }
+
+  std::string depInit = depCompiler.globalInit;
+  if (depInit.starts_with(setupScoreboards)) {
+    depInit = depInit.substr(std::strlen(setupScoreboards));
+  }
+
+  std::istringstream depStream(depInit);
+  std::string depLine;
+  while (std::getline(depStream, depLine)) {
+    if (depLine.starts_with("scoreboard") || depLine.starts_with("data")) {
+      globalInit += depLine + "\n";
+    }
+  }
+}
+
 void Compiler::processEnumDecl(const EnumDeclStmt &decl, SourceLoc loc) {
   if (isBuiltin(decl.name)) throw std::runtime_error(formatError(loc, "Reserved name."));
 
   std::string fullEnumName = prefixName(decl.name);
-  EnumData enumData = {.name = fullEnumName, .exported = decl.isExport};
+  EnumData enumData = {.name = fullEnumName, .exported = decl.isExport, .isExtern = decl.isExtern, .uid = nextTypeUid()};
+
+  if (decl.isExtern) {
+    static std::unordered_set<std::string> globalExternEnums;
+    std::string globalKey = datapackNamespace + ":" + fullEnumName;
+    if (globalExternEnums.contains(globalKey)) {
+      throw std::runtime_error(
+        formatError(loc, "Extern enum '" + decl.name + "' is already defined elsewhere. Multiple definitions of the same extern enum are not allowed.")
+      );
+    }
+    globalExternEnums.insert(globalKey);
+  }
 
   bool typeKnown = false;
   int32_t nextValue = 0;
@@ -903,11 +1112,22 @@ void Compiler::processStructDecl(const StructDeclStmt &decl, SourceLoc loc) {
   if (isBuiltin(decl.name)) throw std::runtime_error(formatError(loc, "Reserved name."));
 
   std::string fullStructName = prefixName(decl.name);
-  StructData structData = {.name = fullStructName, .exported = decl.isExport};
+  StructData structData = {.name = fullStructName, .exported = decl.isExport, .isExtern = decl.isExtern, .uid = nextTypeUid()};
 
   for (const auto &f : decl.fields) {
     Type fieldType = parseTypeFromString(f.typeText);
     structData.fields.emplace_back(f.name, std::make_unique<Type>(std::move(fieldType)), f.isPrivate);
+  }
+
+  if (decl.isExtern) {
+    static std::unordered_set<std::string> globalExternStructs;
+    std::string globalKey = datapackNamespace + ":" + fullStructName;
+    if (globalExternStructs.contains(globalKey)) {
+      throw std::runtime_error(
+        formatError(loc, "Extern struct '" + decl.name + "' is already defined elsewhere. Multiple definitions of the same extern struct are not allowed.")
+      );
+    }
+    globalExternStructs.insert(globalKey);
   }
 
   StructData *structPtr = &(structs[fullStructName] = std::move(structData));
@@ -933,10 +1153,14 @@ void Compiler::processStructDecl(const StructDeclStmt &decl, SourceLoc loc) {
     std::vector<Type> paramTypes;
     for (const auto &p : methodDecl.params) paramTypes.push_back(parseTypeFromString(p.typeText));
 
-    std::string mangledName = methodDecl.name + "_" + randomFunctionMangleString();
+    std::string mangledName = decl.isExtern ? methodDecl.name : methodDecl.name + "_" + randomFunctionMangleString();
 
     std::string registryKey = isConstructor ? fullStructName : (fullStructName + "::" + methodDecl.name);
     std::transform(registryKey.begin(), registryKey.end(), registryKey.begin(), ::tolower);
+
+    if (decl.isExtern && !funcs[registryKey].empty()) {
+      throw std::runtime_error(formatError(methodDecl.loc, "'" + methodDecl.name + "' cannot be overloaded on an extern struct."));
+    }
 
     for (const auto &existing : funcs[registryKey]) {
       if (existing.params == paramTypes) {
@@ -958,6 +1182,8 @@ void Compiler::processStructDecl(const StructDeclStmt &decl, SourceLoc loc) {
        .tag = std::nullopt,
        .exported = decl.isExport,
        .internal = true,
+       .isExtern = decl.isExtern,
+       .emitNamespace = datapackNamespace,
        .ownerStruct = structPtr,
        .isStatic = methodDecl.isStatic,
        .isConstructor = isConstructor,
@@ -994,16 +1220,25 @@ void Compiler::processFuncDeclDeclaration(const FuncDeclStmt &decl, SourceLoc lo
 
   if (decl.isExtern) {
     static std::unordered_set<std::string> globalExternFuncs;
-    if (globalExternFuncs.contains(fullName)) {
+    std::string globalKey = datapackNamespace + ":" + fullName;
+    if (globalExternFuncs.contains(globalKey)) {
       throw std::runtime_error(
         formatError(loc, "Extern function '" + name + "' is already defined elsewhere. Multiple definitions of the same extern function are not allowed.")
       );
     }
-    globalExternFuncs.insert(fullName);
+    globalExternFuncs.insert(globalKey);
   }
 
   funcs[fullName].push_back(
-    {.name = fullName, .mangledName = mangledName, .returnType = retType, .params = paramTypes, .tag = decl.tag, .exported = decl.isExport, .internal = !decl.isExtern}
+    {.name = fullName,
+     .mangledName = mangledName,
+     .returnType = retType,
+     .params = paramTypes,
+     .tag = decl.tag,
+     .exported = decl.isExport,
+     .internal = !decl.isExtern,
+     .isExtern = decl.isExtern,
+     .emitNamespace = datapackNamespace}
   );
 }
 
@@ -1050,6 +1285,7 @@ Compiler::ParamSetupResult Compiler::setupIncomingParameter(const std::string &p
       .scope = scope,
       .value = std::nullopt,
       .constant = false,
+      .emitNamespace = datapackNamespace,
     }
   );
 
@@ -1081,17 +1317,17 @@ Compiler::ParamSetupResult Compiler::setupIncomingParameter(const std::string &p
     result.refCopyback = std::make_pair(argsKey, copyBackFuncName);
 
     result.setup += std::format("data modify storage {0}:global {1} set value {{}}\n", datapackNamespace, argsKey);
-    result.setup += std::format("data modify storage {0}:global {1}.refname set from storage {0}:stack regs[-1]\n", datapackNamespace, argsKey);
-    result.setup += std::format("data remove storage {}:stack regs[-1]\n", datapackNamespace);
+    result.setup += std::format("data modify storage {0}:global {1}.refname set from storage {2}:stack regs[-1]\n", datapackNamespace, argsKey, callStackNamespace);
+    result.setup += std::format("data remove storage {}:stack regs[-1]\n", callStackNamespace);
     result.setup += std::format("function {}:internal/{} with storage {}:global {}\n", datapackNamespace, copyInFuncName, datapackNamespace, argsKey);
 
   } else {
     if (paramType.isString() || paramType.isList() || paramType.isMap() || paramType.isFloat()) {
-      result.setup += std::format("data modify storage {0}:global vars.{1} set from storage {0}:stack regs[-1]\n", datapackNamespace, mangledName);
+      result.setup += std::format("data modify storage {0}:global vars.{1} set from storage {2}:stack regs[-1]\n", datapackNamespace, mangledName, callStackNamespace);
     } else {
-      result.setup += std::format("execute store result score {1} vars run data get storage {0}:stack regs[-1]\n", datapackNamespace, mangledName);
+      result.setup += std::format("execute store result score {1} vars run data get storage {0}:stack regs[-1]\n", callStackNamespace, mangledName);
     }
-    result.setup += std::format("data remove storage {}:stack regs[-1]\n", datapackNamespace);
+    result.setup += std::format("data remove storage {}:stack regs[-1]\n", callStackNamespace);
   }
 
   return result;
@@ -1199,6 +1435,7 @@ void Compiler::compileStructMethod(const StructData &structData, const StructMet
         .scope = blockScope,
         .value = std::nullopt,
         .constant = false,
+        .emitNamespace = datapackNamespace,
       }
     );
     paramSetup += std::format("data modify storage {}:global vars.{} set value {{}}\n", datapackNamespace, thisMangled);

@@ -19,7 +19,7 @@ A programming language that compiles to Minecraft datapacks.
       `sin`, `cos`, `tan`, `asin`, `acos`)
 - [x] Boolean conditional optimizations
 - [x] Entity local variables
-- [ ] Package Management
+- [x] Package Management
 - [ ] Function references
 - [x] Struct methods (and constructor)
 - [ ] Force casting (e.g. `int`/`string`/`float` -> `enum`, `string` ->

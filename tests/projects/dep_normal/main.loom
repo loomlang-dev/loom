@@ -1,0 +1,15 @@
+import example_lib;
+
+func main() {
+  let sum: int = example_lib::add(2, 3);
+
+  example_lib::counter = example_lib::counter + 1;
+
+  let g: example_lib::Greeter = example_lib::Greeter("Steve");
+  let greeting: string = g.greet();
+
+  let color: example_lib::Color = example_lib::Color.Blue;
+  let colorValue: int = example_lib::colorValue(color);
+
+  say ${sum} ${example_lib::counter} ${greeting} ${colorValue};
+}

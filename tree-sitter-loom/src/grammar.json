@@ -116,8 +116,17 @@
           "type": "FIELD",
           "name": "path",
           "content": {
-            "type": "SYMBOL",
-            "name": "path"
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "SYMBOL",
+                "name": "path"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "identifier"
+              }
+            ]
           }
         },
         {
@@ -160,6 +169,18 @@
             {
               "type": "STRING",
               "value": "export"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "STRING",
+              "value": "extern"
             },
             {
               "type": "BLANK"
@@ -317,6 +338,18 @@
             {
               "type": "STRING",
               "value": "export"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "STRING",
+              "value": "extern"
             },
             {
               "type": "BLANK"
@@ -3214,6 +3247,11 @@
     [
       "struct_field",
       "struct_method"
+    ],
+    [
+      "enum_definition",
+      "struct_definition",
+      "_modifier"
     ]
   ],
   "precedences": [],
