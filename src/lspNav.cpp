@@ -118,7 +118,7 @@ void indexBlock(
           FilterMode subFilter = n.isDependency ? FilterMode::ExternOnly : FilterMode::ExportOnly;
           indexBlock(*importedBlock, resolvedPath, importedDir, projectRoot, subNsPath, subIdx, loader, visitedFiles, subFilter);
 
-          std::string aliasPrefix = n.alias ? (*n.alias + "::") : (n.isDependency ? (n.path + "::") : "");
+          std::string aliasPrefix = n.flatten ? "" : (n.alias ? (*n.alias + "::") : (n.isDependency ? (n.path + "::") : ""));
           for (auto &[name, overloads] : subIdx.funcs) {
             for (auto &ref : overloads) idx.funcs[aliasPrefix + name].push_back(ref);
           }

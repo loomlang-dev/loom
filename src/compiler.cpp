@@ -825,7 +825,7 @@ void Compiler::processImportDecl(const ImportStmt &decl, SourceLoc loc) {
   Compiler &importCompiler = *importedCompilers.back();
   std::vector<CompiledFunction> importedFuncs = importCompiler.compile();
 
-  std::string aliasName = decl.alias.value_or("");
+  std::string aliasName = decl.flatten ? "" : decl.alias.value_or("");
 
   for (const auto &[name, overloads] : importCompiler.funcs) {
     std::string importedName = aliasName.empty() ? name : aliasName + "::" + name;
@@ -970,9 +970,10 @@ void Compiler::processDependencyImportDecl(const ImportStmt &decl, SourceLoc loc
   }
 
   std::string aliasName = decl.alias.value_or(depName);
+  std::string prefix = decl.flatten ? "" : (aliasName + "::");
 
   for (const auto &[name, overloads] : depCompiler.funcs) {
-    std::string importedName = aliasName + "::" + name;
+    std::string importedName = prefix + name;
     std::transform(importedName.begin(), importedName.end(), importedName.begin(), ::tolower);
     for (const auto &funcData : overloads) {
       if (!funcData.isExtern) continue;
@@ -992,7 +993,7 @@ void Compiler::processDependencyImportDecl(const ImportStmt &decl, SourceLoc loc
 
   for (const auto &[name, varData] : depCompiler.vars) {
     if (!varData.isExtern) continue;
-    std::string importedName = aliasName + "::" + name;
+    std::string importedName = prefix + name;
     if (vars.contains(importedName)) {
       throw std::runtime_error(formatError(loc, "Dependency variable '" + importedName + "' collides with an existing variable."));
     }
@@ -1005,7 +1006,7 @@ void Compiler::processDependencyImportDecl(const ImportStmt &decl, SourceLoc loc
 
   for (const auto &[name, structData] : depCompiler.structs) {
     if (!structData.isExtern) continue;
-    std::string importedName = aliasName + "::" + name;
+    std::string importedName = prefix + name;
     if (structs.contains(importedName)) {
       throw std::runtime_error(formatError(loc, "Dependency struct '" + importedName + "' collides with an existing struct."));
     }
@@ -1017,7 +1018,7 @@ void Compiler::processDependencyImportDecl(const ImportStmt &decl, SourceLoc loc
 
   for (const auto &[name, enumData] : depCompiler.enums) {
     if (!enumData.isExtern) continue;
-    std::string importedName = aliasName + "::" + name;
+    std::string importedName = prefix + name;
     if (enums.contains(importedName)) {
       throw std::runtime_error(formatError(loc, "Dependency enum '" + importedName + "' collides with an existing enum."));
     }

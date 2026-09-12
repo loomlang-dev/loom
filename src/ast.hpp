@@ -262,6 +262,7 @@ struct ImportStmt {
   std::string path;
   std::optional<std::string> alias;
   bool isDependency = false;
+  bool flatten = false;
 };
 
 struct ReturnStmt {

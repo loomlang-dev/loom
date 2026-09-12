@@ -64,7 +64,7 @@ module.exports = grammar({
       seq(
         "import",
         field("path", choice($.path, $.identifier)),
-        optional(seq("as", field("alias", $.identifier))),
+        optional(seq("as", choice(field("alias", $.identifier), "*"))),
       ),
 
     path: () => /[\.\/a-zA-Z0-9_-]+\.loom/,

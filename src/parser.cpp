@@ -848,8 +848,16 @@ std::unique_ptr<Stmt> Parser::parseImportDecl() {
   }
 
   std::optional<std::string> alias;
-  if (match(TokenKind::KwAs)) alias = std::string(expect(TokenKind::Identifier, "alias name").text);
-  return makeStmt(startTok, ImportStmt{.path = std::move(path), .alias = std::move(alias), .isDependency = isDependency});
+  bool flatten = false;
+  if (match(TokenKind::KwAs)) {
+    if (check(TokenKind::Star)) {
+      advance();
+      flatten = true;
+    } else {
+      alias = std::string(expect(TokenKind::Identifier, "alias name, or '*' to import without a namespace").text);
+    }
+  }
+  return makeStmt(startTok, ImportStmt{.path = std::move(path), .alias = std::move(alias), .isDependency = isDependency, .flatten = flatten});
 }
 
 std::unique_ptr<Stmt> Parser::parseReturnStmt() {
