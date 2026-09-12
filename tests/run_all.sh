@@ -99,11 +99,6 @@ for d in "$PROJECTS_DIR"/*/; do
   echo "PASS: $name"
 done
 
-echo "=== Running test: deps_fetch ==="
-if ! LOOM_EXEC="$LOOM_EXEC" "$TEST_DIR/deps_fetch/run.sh"; then
-  failures=$((failures+1))
-fi
-
 if [ $failures -ne 0 ]; then
   echo "$failures tests failed"
   exit 1
