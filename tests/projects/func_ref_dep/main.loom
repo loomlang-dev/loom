@@ -1,0 +1,8 @@
+import example_lib;
+
+func main() {
+  let f: (int, int) -> int = example_lib::add;
+  let r: int = f(4, 5);
+
+  say ${r};
+}

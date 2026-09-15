@@ -20,16 +20,16 @@ A programming language that compiles to Minecraft datapacks.
 - [x] Boolean conditional optimizations
 - [x] Entity local variables
 - [x] Package Management
-- [ ] Function references
+- [x] Function references
 - [x] Struct methods (and constructor)
 - [ ] Force casting (e.g. `int`/`string`/`float` -> `enum`, `string` ->
-      `&func<>`)
+      `(int, int) -> int`)
 - [ ] Custom type definitions
 - [ ] Data access
 - [ ] Classes
 - [ ] Operater overloading
 - [ ] Generics
-- [ ] Lambda functions
+- [x] Lambda functions
 - [ ] Inline advancements and dialogs
 - [ ] CLI Utils
 - [ ] Bitwise

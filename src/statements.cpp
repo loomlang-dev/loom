@@ -136,16 +136,26 @@ std::string Compiler::compileBlock(const Block &block) {
               if (expr.precomputed) {
                 ret += std::format("data modify storage {0}:global vars.{1}.{2} set value {3}\n", datapackNamespace, thisMangled, name, expr.data);
               } else if (expr.type.isString() || expr.type.isList() || expr.type.isMap() || expr.type.isStruct()) {
-                ret += std::format("{0}\ndata modify storage {1}:global vars.{2}.{3} set from storage {1}:global expr_str1\n", expr.data, datapackNamespace, thisMangled, name);
+                ret +=
+                  std::format("{0}\ndata modify storage {1}:global vars.{2}.{3} set from storage {1}:global expr_str1\n", expr.data, datapackNamespace, thisMangled, name);
               } else if (expr.type.isFloat()) {
-                ret += std::format("{0}\ndata modify storage {1}:global vars.{2}.{3} set from storage {1}:global expr_float1\n", expr.data, datapackNamespace, thisMangled, name);
+                ret +=
+                  std::format("{0}\ndata modify storage {1}:global vars.{2}.{3} set from storage {1}:global expr_float1\n", expr.data, datapackNamespace, thisMangled, name);
               } else {
                 ret += std::format(
-                  "{0}\nexecute store result storage {1}:global vars.{2}.{3} int 1 run scoreboard players get expr_output1 temp\n", expr.data, datapackNamespace, thisMangled, name
+                  "{0}\nexecute store result storage {1}:global vars.{2}.{3} int 1 run scoreboard players get expr_output1 temp\n",
+                  expr.data,
+                  datapackNamespace,
+                  thisMangled,
+                  name
                 );
               }
               return;
             }
+          }
+
+          if (varIt == vars.end() && currentCaptures.contains(name)) {
+            throw std::runtime_error(formatError(stmt.loc, "Cannot assign to captured variable '" + name + "'; captures are read-only snapshots."));
           }
 
           if (varIt == vars.end()) {
@@ -425,7 +435,9 @@ std::string Compiler::compileBlock(const Block &block) {
             return;
           }
 
-          const ExpressionData expr = compileExpression(expNode);
+          const LambdaExpr *lambdaAssign = std::get_if<LambdaExpr>(&expNode.data);
+          const ExpressionData expr =
+            (lambdaAssign && varData.type.isFunction()) ? compileLambdaExpr(*lambdaAssign, varData.type, 1, expNode.loc) : compileExpression(expNode);
 
           const Type &actualType = varData.type.isRef() ? *varData.type.baseType : varData.type;
 

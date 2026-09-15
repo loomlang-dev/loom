@@ -31,6 +31,7 @@ module.exports = grammar({
     [$.namespaced_identifier, $.namespaced_arg],
     [$.struct_field, $.struct_method],
     [$.enum_definition, $.struct_definition, $._modifier],
+    [$.paren_type, $._function_type_param],
   ],
 
   rules: {
@@ -322,12 +323,24 @@ module.exports = grammar({
         $.float,
         $.boolean,
         $.string_literal,
+        $.lambda_expression,
         $.parenthesized_expression,
         $.list_expression,
         $.cast_expression,
         $.struct_expression,
         $.map_expression,
         $.reference_expression,
+      ),
+
+    lambda_expression: ($) =>
+      prec.right(
+        seq(
+          "(",
+          field("parameters", commaSep($.parameter)),
+          ")",
+          "->",
+          field("body", choice($._expression, $.block)),
+        ),
       ),
 
     // `map<K, V>()` — always constructs an empty map; see mapHandler.cpp in the compiler.
@@ -562,7 +575,7 @@ module.exports = grammar({
     identifier: () => /[a-z_][a-z0-9_]*/i,
 
     type: ($) =>
-      choice($.namespaced_identifier, $.list_type, $.ref_type, $.paren_type, $.map_type),
+      choice($.namespaced_identifier, $.list_type, $.ref_type, $.paren_type, $.map_type, $.function_type),
     list_type: ($) => seq($.type, "[]"),
     ref_type: ($) => prec(1, seq("&", $.type)),
     paren_type: ($) => seq("(", $.type, ")"),
@@ -575,6 +588,18 @@ module.exports = grammar({
         field("value", $.type),
         ">",
       ),
+    function_type: ($) =>
+      prec.right(
+        seq(
+          "(",
+          optional(seq($._function_type_param, repeat(seq(",", $._function_type_param)))),
+          ")",
+          "->",
+          optional(field("return", $.type)),
+        ),
+      ),
+    _function_type_param: ($) =>
+      seq(optional(seq($.identifier, ":")), $.type),
 
     string_literal: ($) =>
       choice(

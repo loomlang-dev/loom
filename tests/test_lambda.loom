@@ -1,0 +1,19 @@
+func main() {
+  let f: (int, int) -> int = (a: int, b: int) -> a + b;
+  let r1: int = f(2, 3);
+
+  let g: (int, int) -> int = (a: int, b: int) -> {
+    let diff: int = a - b;
+    return diff
+  };
+  let r2: int = g(10, 4);
+
+  let inferred = (a: int, b: int) -> a * b;
+  let r3: int = inferred(3, 4);
+
+  let multiplier: int = 3;
+  let scale: (int) -> int = (x: int) -> x * multiplier;
+  let r4: int = scale(5);
+
+  say ${r1} ${r2} ${r3} ${r4};
+}

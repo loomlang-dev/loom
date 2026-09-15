@@ -51,6 +51,30 @@ for f in "$TEST_DIR"/*.loom; do
     continue
   fi
 
+  if [ "$name" = "test_func_ref" ] && ! grep -rq "internal_call_ref_int" "$od/data"; then
+    echo "FAIL: $name did not emit the indirect-call helper (internal_call_ref_int)"
+    failures=$((failures+1))
+    continue
+  fi
+
+  if [ "$name" = "test_lambda" ]; then
+    if ! find "$od/data" -name '__lambda_*.mcfunction' | grep -q .; then
+      echo "FAIL: $name did not emit any synthesized lambda functions"
+      failures=$((failures+1))
+      continue
+    fi
+    if ! grep -rq "internal_call_ref_int" "$od/data"; then
+      echo "FAIL: $name did not emit the indirect-call helper (internal_call_ref_int)"
+      failures=$((failures+1))
+      continue
+    fi
+    if ! grep -rq "closureEnv_" "$od/data"; then
+      echo "FAIL: $name did not emit a capturing-closure environment (closureEnv_*)"
+      failures=$((failures+1))
+      continue
+    fi
+  fi
+
   echo "PASS: $name"
 done
 
@@ -94,6 +118,19 @@ for d in "$PROJECTS_DIR"/*/; do
     echo "FAIL: $name should emit a data/example_lib folder (dependency was embedded)"
     failures=$((failures+1))
     continue
+  fi
+
+  if [ "$name" = "func_ref_dep" ]; then
+    if ! grep -rq "internal_call_ref_int" "$od/data"; then
+      echo "FAIL: $name did not emit the indirect-call helper (internal_call_ref_int)"
+      failures=$((failures+1))
+      continue
+    fi
+    if ! grep -rq '"example_lib:add"' "$od/data"; then
+      echo "FAIL: $name did not capture example_lib:add as the reference target (cross-package function reference)"
+      failures=$((failures+1))
+      continue
+    fi
   fi
 
   echo "PASS: $name"

@@ -97,6 +97,9 @@ private:
   std::unique_ptr<Expr> parsePostfixContinuation(std::unique_ptr<Expr> expr);
   std::unique_ptr<Expr> parsePrimary();
   std::unique_ptr<Expr> tryParseAtTest();
+
+  bool looksLikeLambda() const;
+  std::unique_ptr<Expr> parseLambdaExpr();
 };
 
 std::string exprToString(const Expr &expr);

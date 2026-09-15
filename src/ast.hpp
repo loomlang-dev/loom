@@ -118,6 +118,19 @@ struct ReferenceExpr {
   std::string targetName;
 };
 
+struct Param {
+  std::string name;
+  SourceLoc loc;
+  std::string typeText;
+  SourceLoc typeLoc;
+};
+
+struct LambdaExpr {
+  std::vector<Param> params;
+  std::unique_ptr<Block> body;
+  bool isExpressionBody = false;
+};
+
 struct Expr {
   SourceLoc loc;
   std::variant<
@@ -139,7 +152,8 @@ struct Expr {
     CastExpr,
     StructExpr,
     ListExpr,
-    ReferenceExpr>
+    ReferenceExpr,
+    LambdaExpr>
     data;
 };
 
@@ -192,12 +206,6 @@ struct AssignStmt {
   std::unique_ptr<Expr> value;
 };
 
-struct Param {
-  std::string name;
-  SourceLoc loc;
-  std::string typeText;
-  SourceLoc typeLoc;
-};
 struct FuncDeclStmt {
   std::optional<std::string> tag;
   bool isExport = false;

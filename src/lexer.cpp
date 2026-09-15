@@ -55,6 +55,8 @@ const char *tokenKindName(TokenKind kind) {
     return "+";
   case TokenKind::Minus:
     return "-";
+  case TokenKind::Arrow:
+    return "->";
   case TokenKind::Star:
     return "*";
   case TokenKind::Slash:
@@ -279,7 +281,8 @@ std::vector<Token> Lexer::tokenize() {
       tokens.push_back(makeToken(TokenKind::Plus, startByte, startLine, startCol));
       break;
     case '-':
-      tokens.push_back(makeToken(TokenKind::Minus, startByte, startLine, startCol));
+      if (match('>')) tokens.push_back(makeToken(TokenKind::Arrow, startByte, startLine, startCol));
+      else tokens.push_back(makeToken(TokenKind::Minus, startByte, startLine, startCol));
       break;
     case '*':
       tokens.push_back(makeToken(TokenKind::Star, startByte, startLine, startCol));

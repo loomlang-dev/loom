@@ -80,7 +80,20 @@ Compiler::Type Compiler::parseTypeFromString(const std::string &typeText) const 
 
   std::string t = trim(typeText);
 
-  while (!t.empty() && t.front() == '(' && t.back() == ')') {
+  while (!t.empty() && t.front() == '(') {
+    int depth = 0;
+    size_t matchIdx = std::string::npos;
+    for (size_t i = 0; i < t.size(); i++) {
+      if (t[i] == '(') depth++;
+      else if (t[i] == ')') {
+        depth--;
+        if (depth == 0) {
+          matchIdx = i;
+          break;
+        }
+      }
+    }
+    if (matchIdx == std::string::npos || matchIdx != t.size() - 1) break;
     t = trim(t.substr(1, t.size() - 2));
   }
 
@@ -109,6 +122,63 @@ Compiler::Type Compiler::parseTypeFromString(const std::string &typeText) const 
     return Type::MapTypeOf(parseTypeFromString(inner.substr(0, splitPos)), parseTypeFromString(inner.substr(splitPos + 1)));
   }
 
+  if (!t.empty() && t.front() == '(') {
+    int depth = 0;
+    size_t closeIdx = std::string::npos;
+    for (size_t i = 0; i < t.size(); i++) {
+      if (t[i] == '(') depth++;
+      else if (t[i] == ')') {
+        depth--;
+        if (depth == 0) {
+          closeIdx = i;
+          break;
+        }
+      }
+    }
+    if (closeIdx == std::string::npos) throw std::runtime_error(std::format("Invalid type: {}", t));
+
+    std::string rest = trim(t.substr(closeIdx + 1));
+    if (rest.compare(0, 2, "->") == 0) {
+      std::string paramsText = trim(t.substr(1, closeIdx - 1));
+      std::string returnText = trim(rest.substr(2));
+
+      auto stripLabel = [](std::string piece) {
+        size_t i = 0;
+        while (i < piece.size() && (std::isalnum(static_cast<unsigned char>(piece[i])) || piece[i] == '_')) i++;
+        if (i == 0) return piece;
+        size_t j = i;
+        while (j < piece.size() && std::isspace(static_cast<unsigned char>(piece[j]))) j++;
+        if (j < piece.size() && piece[j] == ':' && !(j + 1 < piece.size() && piece[j + 1] == ':')) return piece.substr(j + 1);
+        return piece;
+      };
+
+      std::vector<Type> paramTypes;
+      if (!paramsText.empty()) {
+        int pdepth = 0;
+        size_t start = 0;
+        for (size_t i = 0; i <= paramsText.size(); i++) {
+          bool atEnd = i == paramsText.size();
+          char c = atEnd ? '\0' : paramsText[i];
+          if (!atEnd && (c == '(' || c == '<' || c == '[')) pdepth++;
+          else if (!atEnd && (c == ')' || c == '>' || c == ']')) pdepth--;
+          if (atEnd || (c == ',' && pdepth == 0)) {
+            std::string piece = trim(stripLabel(trim(paramsText.substr(start, i - start))));
+            if (piece.empty()) throw std::runtime_error(std::format("Invalid function type: {}", t));
+            paramTypes.push_back(parseTypeFromString(piece));
+            start = i + 1;
+          }
+        }
+      }
+
+      std::optional<Type> returnType;
+      if (!returnText.empty()) returnType = parseTypeFromString(returnText);
+
+      return Type::FunctionTypeOf(std::move(paramTypes), std::move(returnType));
+    }
+
+    throw std::runtime_error(std::format("Invalid type: {}", t));
+  }
+
   if (t == "int") return Type::IntegerType();
   if (t == "bool") return Type::BooleanType();
   if (t == "string") return Type::StringType();
@@ -135,15 +205,15 @@ std::string Compiler::compileVariableDeclaration(const VarDeclStmt &decl, Source
     throw std::runtime_error(formatError(loc, "'@entity' variables must be declared at global scope."));
   }
 
-  const ExpressionData expr = compileExpression(*decl.value);
+  std::optional<Type> declaredType;
+  if (decl.typeText.has_value()) declaredType = parseTypeFromString(*decl.typeText);
+
+  const LambdaExpr *lambdaInit = std::get_if<LambdaExpr>(&decl.value->data);
+  const ExpressionData expr = (lambdaInit && declaredType.has_value()) ? compileLambdaExpr(*lambdaInit, declaredType, 1, decl.value->loc) : compileExpression(*decl.value);
+
   const bool constant = decl.isConst;
-  Type varType;
   std::optional<std::string> value = std::nullopt;
-  if (decl.typeText.has_value()) {
-    varType = parseTypeFromString(*decl.typeText);
-  } else {
-    varType = expr.type;
-  }
+  Type varType = declaredType.value_or(expr.type);
 
   if (constant && expr.precomputed) {
     value = expr.data;
@@ -349,6 +419,8 @@ std::vector<Compiler::CompiledFunction> Compiler::compile() {
   internalFunctions.push_back(
     {.name = "internal_deref_object", .data = std::format("$data modify storage {0}:global expr_str$(out_id) set from storage {0}:global vars.$(refname)", datapackNamespace)}
   );
+  internalFunctions.push_back({.name = "internal_call_ref", .data = "$function $(target)"});
+  internalFunctions.push_back({.name = "internal_call_ref_int", .data = "$execute store result score expr_output$(out_id) temp run function $(target)"});
   internalFunctions.push_back(
     {.name = "internal_list_slice",
      .data = std::format(

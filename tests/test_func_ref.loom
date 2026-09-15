@@ -1,0 +1,17 @@
+func add(a: int, b: int): int {
+  return a + b
+}
+
+func sub(a: int, b: int): int {
+  return a - b
+}
+
+func main() {
+  let f: (int, int) -> int = add;
+  let r1: int = f(2, 3);
+
+  f = sub;
+  let r2: int = f(10, 4);
+
+  say ${r1} ${r2};
+}

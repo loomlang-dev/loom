@@ -77,13 +77,14 @@ public:
   struct StructData;
 
   struct Type {
-    enum Kind { Integer, Boolean, String, Enum, List, Float, Struct, Reference, Map } kind = Integer;
+    enum Kind { Integer, Boolean, String, Enum, List, Float, Struct, Reference, Map, Function } kind = Integer;
     const EnumData *enumRef = nullptr;
     const StructData *structRef = nullptr;
     bool isReference = false;
 
     std::unique_ptr<Type> baseType = nullptr;
     std::unique_ptr<Type> mapValueType = nullptr;
+    std::vector<Type> funcParams;
 
     Type() = default;
 
@@ -102,10 +103,15 @@ public:
       t.mapValueType = std::make_unique<Type>(std::move(valueType));
       return t;
     }
+    static Type FunctionTypeOf(std::vector<Type> params, std::optional<Type> returnType) {
+      Type t{Function, nullptr, nullptr, returnType.has_value() ? std::make_unique<Type>(std::move(*returnType)) : nullptr};
+      t.funcParams = std::move(params);
+      return t;
+    }
 
     Type(const Type &o)
         : kind(o.kind), enumRef(o.enumRef), structRef(o.structRef), baseType(o.baseType ? std::make_unique<Type>(*o.baseType) : nullptr),
-          mapValueType(o.mapValueType ? std::make_unique<Type>(*o.mapValueType) : nullptr) {}
+          mapValueType(o.mapValueType ? std::make_unique<Type>(*o.mapValueType) : nullptr), funcParams(o.funcParams) {}
 
     Type &operator=(const Type &o) {
       if (this != &o) {
@@ -114,6 +120,7 @@ public:
         structRef = o.structRef;
         baseType = o.baseType ? std::make_unique<Type>(*o.baseType) : nullptr;
         mapValueType = o.mapValueType ? std::make_unique<Type>(*o.mapValueType) : nullptr;
+        funcParams = o.funcParams;
       }
       return *this;
     }
@@ -128,6 +135,12 @@ public:
       }
       if (structRef != o.structRef) {
         if (!structRef || !o.structRef || structRef->uid == 0 || structRef->uid != o.structRef->uid) return false;
+      }
+      if (kind == Function) {
+        if (funcParams.size() != o.funcParams.size()) return false;
+        for (size_t i = 0; i < funcParams.size(); i++) {
+          if (funcParams[i] != o.funcParams[i]) return false;
+        }
       }
       if (baseType && o.baseType) {
         if (*baseType != *o.baseType) return false;
@@ -151,7 +164,7 @@ public:
     }
     bool isBoolean() const { return kind == Boolean; }
     bool isString() const {
-      if (kind == String) return true;
+      if (kind == String || kind == Function) return true;
       if (kind == Enum && enumRef) return enumRef->type == EnumType::String;
       return false;
     }
@@ -159,6 +172,7 @@ public:
     bool isStruct() const { return kind == Struct; }
     bool isRef() const { return kind == Reference; }
     bool isMap() const { return kind == Map; }
+    bool isFunction() const { return kind == Function; }
 
     const Type &deref() const { return isRef() ? *baseType : *this; }
   };
@@ -295,6 +309,12 @@ private:
 
   const StructData *currentStructContext = nullptr;
 
+  struct CaptureInfo {
+    std::string storagePath;
+    Type type;
+  };
+  std::unordered_map<std::string, CaptureInfo> currentCaptures;
+
   bool recoverFromErrors = true;
   std::vector<std::string> diagnostics;
   std::unordered_set<const Stmt *> failedDecls;
@@ -337,6 +357,14 @@ private:
     bool precompute,
     SourceLoc loc
   );
+
+  ExpressionData compileIndirectCall(const std::string &refName, const Type &refType, const std::vector<const Expr *> &argNodes, unsigned int id, SourceLoc loc);
+
+  ExpressionData compileLambdaExpr(const LambdaExpr &n, std::optional<Type> expectedType, unsigned int id, SourceLoc loc);
+
+  void collectFreeVariableNames(const Block &block, std::unordered_set<std::string> &out);
+  void collectFreeVariableNames(const Expr &expr, std::unordered_set<std::string> &out);
+  void collectFreeVariableNames(const Stmt &stmt, std::unordered_set<std::string> &out);
 
   ExpressionData compileMapGet(ExpressionData target, ExpressionData index, unsigned int id, SourceLoc loc);
 

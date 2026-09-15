@@ -83,8 +83,47 @@ static void parseTypeTextInner(Parser &self) {
   }
   if (self.check(TokenKind::LParen)) {
     self.advance();
-    parseTypeTextInner(self);
+
+    auto parseParamType = [&self] {
+      if (self.check(TokenKind::Identifier) && self.peek(1).kind == TokenKind::Colon) {
+        self.advance();
+        self.advance();
+      }
+      parseTypeTextInner(self);
+      while (self.check(TokenKind::LBracket)) {
+        self.advance();
+        self.expect(TokenKind::RBracket, "']' to close list type");
+      }
+    };
+
+    int paramCount = 0;
+    bool hadComma = false;
+    if (!self.check(TokenKind::RParen)) {
+      parseParamType();
+      paramCount++;
+      while (self.check(TokenKind::Comma)) {
+        self.advance();
+        hadComma = true;
+        parseParamType();
+        paramCount++;
+      }
+    }
     self.expect(TokenKind::RParen, "')' to close type");
+
+    if (self.match(TokenKind::Arrow)) {
+      if (self.check(TokenKind::Identifier) || self.check(TokenKind::Amp) || self.check(TokenKind::LParen)) {
+        parseTypeTextInner(self);
+        while (self.check(TokenKind::LBracket)) {
+          self.advance();
+          self.expect(TokenKind::RBracket, "']' to close list type");
+        }
+      }
+      return;
+    }
+
+    if (paramCount != 1 || hadComma) {
+      self.error(self.peek(), "Expected '->' after parameter list");
+    }
     return;
   }
   std::string ident = self.parseNamespacedIdentifier();
@@ -361,7 +400,59 @@ std::unique_ptr<Expr> Parser::parsePostfixContinuation(std::unique_ptr<Expr> exp
   return expr;
 }
 
+bool Parser::looksLikeLambda() const {
+  if (peek().kind != TokenKind::LParen) return false;
+  int depth = 0;
+  size_t ahead = 0;
+  while (true) {
+    const Token &t = peek(ahead);
+    if (t.kind == TokenKind::EndOfFile) return false;
+    if (t.kind == TokenKind::LParen) {
+      depth++;
+    } else if (t.kind == TokenKind::RParen) {
+      depth--;
+      if (depth == 0) return peek(ahead + 1).kind == TokenKind::Arrow;
+    }
+    ahead++;
+  }
+}
+
+std::unique_ptr<Expr> Parser::parseLambdaExpr() {
+  const Token &startTok = peek();
+  expect(TokenKind::LParen, "'(' to start lambda parameter list");
+  std::vector<Param> params;
+  parseCommaSeparated(*this, TokenKind::RParen, false, [&] {
+    const Token &pnameTok = expect(TokenKind::Identifier, "parameter name");
+    std::string pname(pnameTok.text);
+    SourceLoc pnameLoc = locOf(pnameTok);
+    expect(TokenKind::Colon, "':' after parameter name");
+    SourceLoc ptypeLoc;
+    std::string ptype = parseTypeText(ptypeLoc);
+    params.push_back(Param{.name = std::move(pname), .loc = pnameLoc, .typeText = std::move(ptype), .typeLoc = ptypeLoc});
+  });
+  expect(TokenKind::RParen, "')' to close lambda parameter list");
+  expect(TokenKind::Arrow, "'->' after lambda parameter list");
+
+  std::unique_ptr<Block> body;
+  bool isExpressionBody = !check(TokenKind::LBrace);
+  if (!isExpressionBody) {
+    body = parseBlock();
+  } else {
+    const Token &exprStartTok = peek();
+    auto expr = parseExpression();
+    auto returnStmt = makeStmt(exprStartTok, ReturnStmt{.value = std::move(expr)});
+    body = std::make_unique<Block>();
+    body->startByte = exprStartTok.startByte;
+    body->endByte = previous().endByte;
+    body->statements.push_back(std::move(returnStmt));
+  }
+
+  return makeExpr(startTok, LambdaExpr{.params = std::move(params), .body = std::move(body), .isExpressionBody = isExpressionBody});
+}
+
 std::unique_ptr<Expr> Parser::parsePrimary() {
+  if (looksLikeLambda()) return parseLambdaExpr();
+
   if (auto atTest = tryParseAtTest()) return atTest;
 
   const Token &tok = peek();
@@ -786,7 +877,8 @@ std::unique_ptr<Stmt> Parser::parseStructDecl(bool isExport, bool isExtern) {
   }
   expect(TokenKind::RBrace, "'}' to close struct");
   return makeStmt(
-    startTok, StructDeclStmt{.isExport = isExport, .isExtern = isExtern, .name = std::move(name), .nameLoc = nameLoc, .fields = std::move(fields), .methods = std::move(methods)}
+    startTok,
+    StructDeclStmt{.isExport = isExport, .isExtern = isExtern, .name = std::move(name), .nameLoc = nameLoc, .fields = std::move(fields), .methods = std::move(methods)}
   );
 }
 
