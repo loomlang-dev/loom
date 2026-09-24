@@ -350,6 +350,10 @@ nlohmann::json LspServer::handleCompletion(const nlohmann::json &params) {
     j["label"] = item.label;
     j["kind"] = completionKindFor(item.kind);
     if (!item.detail.empty()) j["detail"] = item.detail;
+    if (item.insertText.has_value()) {
+      j["insertText"] = *item.insertText;
+      j["insertTextFormat"] = item.insertTextIsSnippet ? 2 : 1;
+    }
     result.push_back(j);
   }
   return result;

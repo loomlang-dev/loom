@@ -26,6 +26,8 @@ struct CompletionEntry {
   std::string label;
   std::string kind;
   std::string detail;
+  std::optional<std::string> insertText;
+  bool insertTextIsSnippet = false;
 };
 
 struct SemanticToken {

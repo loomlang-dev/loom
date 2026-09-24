@@ -25,6 +25,23 @@ std::string formatParams(const std::vector<Param> &params) {
 
 std::string wrap(const std::string &s) { return "```loom\n" + s + "\n```"; }
 
+CompletionEntry callableEntry(std::string label, std::string kind, std::string detail) {
+  CompletionEntry e;
+  e.insertText = label + "($0)";
+  e.insertTextIsSnippet = true;
+  e.label = std::move(label);
+  e.kind = std::move(kind);
+  e.detail = std::move(detail);
+  return e;
+}
+
+bool looksLikeFunctionTypeText(const std::string &typeText) {
+  size_t start = 0;
+  while (start < typeText.size() && typeText[start] == ' ') start++;
+  if (start >= typeText.size() || typeText[start] != '(') return false;
+  return typeText.find("->") != std::string::npos;
+}
+
 std::string baseTypeName(const std::string &raw) {
   size_t start = 0;
   while (start < raw.size() && (raw[start] == '&' || raw[start] == ' ')) start++;
@@ -1049,6 +1066,56 @@ bool insideMapTypeArgs(const std::vector<Token> &toks, size_t uptoExclusive) {
   return false;
 }
 
+bool isColonTypeAnchor(const std::vector<Token> &toks, size_t colonIdx) {
+  if (enclosingConstruct(toks, colonIdx) == EnclosureKind::StructLiteral) return false;
+  int depth = 0;
+  for (size_t j = colonIdx; j-- > 0;) {
+    TokenKind k = toks[j].kind;
+    if (k == TokenKind::Semicolon || k == TokenKind::LBrace || k == TokenKind::RBrace) break;
+    if (k == TokenKind::Colon) depth++;
+    else if (k == TokenKind::Question) {
+      if (depth == 0) return false;
+      depth--;
+    }
+  }
+  return true;
+}
+
+bool isInFunctionTypeParens(const std::vector<Token> &toks, size_t fromIdxExclusive) {
+  std::vector<TokenKind> stack;
+  for (size_t i = fromIdxExclusive; i-- > 0;) {
+    TokenKind k = toks[i].kind;
+    if (!stack.empty()) {
+      if (k == TokenKind::RParen || k == TokenKind::RBracket || k == TokenKind::RBrace) {
+        stack.push_back(k);
+      } else if (k == TokenKind::LParen && stack.back() == TokenKind::RParen) {
+        stack.pop_back();
+      } else if (k == TokenKind::LBracket && stack.back() == TokenKind::RBracket) {
+        stack.pop_back();
+      } else if (k == TokenKind::LBrace && stack.back() == TokenKind::RBrace) {
+        stack.pop_back();
+      }
+      continue;
+    }
+    if (k == TokenKind::RParen || k == TokenKind::RBracket || k == TokenKind::RBrace) {
+      stack.push_back(k);
+      continue;
+    }
+    if (k == TokenKind::LParen) {
+      if (i == 0) return false;
+      TokenKind before2 = toks[i - 1].kind;
+      if (before2 == TokenKind::Colon) return isColonTypeAnchor(toks, i - 1);
+      if (before2 == TokenKind::Arrow) return isInFunctionTypeParens(toks, i - 1);
+      return false;
+    }
+    if (k == TokenKind::LBracket || k == TokenKind::LBrace) return false;
+    if (k == TokenKind::Arrow || k == TokenKind::Comma || k == TokenKind::Identifier) continue;
+    if (k == TokenKind::Colon) return isColonTypeAnchor(toks, i);
+    return false;
+  }
+  return false;
+}
+
 std::vector<std::string> readChain(const std::vector<Token> &before, TokenKind sepKind) {
   std::vector<std::string> chain;
   int idx = static_cast<int>(before.size()) - 1;
@@ -1110,19 +1177,18 @@ PositionAnalysis analyzePosition(const std::string &text, uint32_t offset) {
     return result;
   }
 
-  if (prev.kind == TokenKind::Colon) {
-    if (enclosingConstruct(before, before.size() - 1) == EnclosureKind::StructLiteral) return result;
+  if ((prev.kind == TokenKind::LParen || prev.kind == TokenKind::Comma) && isInFunctionTypeParens(before, before.size())) {
+    result.ctx = CompletionContext::Type;
+    return result;
+  }
 
-    int depth = 0;
-    for (auto it = before.rbegin() + 1; it != before.rend(); ++it) {
-      TokenKind k = it->kind;
-      if (k == TokenKind::Semicolon || k == TokenKind::LBrace || k == TokenKind::RBrace) break;
-      if (k == TokenKind::Colon) depth++;
-      else if (k == TokenKind::Question) {
-        if (depth == 0) return result;
-        depth--;
-      }
-    }
+  if (prev.kind == TokenKind::Arrow && isInFunctionTypeParens(before, before.size() - 1)) {
+    result.ctx = CompletionContext::Type;
+    return result;
+  }
+
+  if (prev.kind == TokenKind::Colon) {
+    if (!isColonTypeAnchor(before, before.size() - 1)) return result;
     result.ctx = CompletionContext::Type;
     return result;
   }
@@ -1209,21 +1275,27 @@ void addFieldsAndMethods(const StructDeclStmt &s, bool showPrivate, bool wantSta
   if (!wantStatic) {
     for (const auto &f : s.fields) {
       if (f.isPrivate && !showPrivate) continue;
-      items.push_back(CompletionEntry{.label = f.name, .kind = "field", .detail = ": " + f.typeText});
+      if (looksLikeFunctionTypeText(f.typeText)) {
+        items.push_back(callableEntry(f.name, "field", ": " + f.typeText));
+      } else {
+        items.push_back(CompletionEntry{.label = f.name, .kind = "field", .detail = ": " + f.typeText});
+      }
     }
   }
   for (const auto &m : s.methods) {
     if (m.isPrivate && !showPrivate) continue;
     if (m.isStatic != wantStatic) continue;
     std::string ret = m.returnTypeText ? (": " + *m.returnTypeText) : "";
-    items.push_back(CompletionEntry{.label = m.name, .kind = "method", .detail = "(" + formatParams(m.params) + ")" + ret});
+    items.push_back(callableEntry(m.name, "method", "(" + formatParams(m.params) + ")" + ret));
   }
 }
 
 void addLocalScopeCompletions(const WalkCtx &scope, std::vector<CompletionEntry> &items) {
   std::unordered_set<std::string> seen;
   for (const auto *p : scope.params) {
-    if (seen.insert(p->name).second) items.push_back(CompletionEntry{.label = p->name, .kind = "variable", .detail = ": " + p->typeText});
+    if (!seen.insert(p->name).second) continue;
+    if (looksLikeFunctionTypeText(p->typeText)) items.push_back(callableEntry(p->name, "variable", ": " + p->typeText));
+    else items.push_back(CompletionEntry{.label = p->name, .kind = "variable", .detail = ": " + p->typeText});
   }
   for (const auto &fi : scope.forIterators) {
     if (seen.insert(fi.first).second) items.push_back(CompletionEntry{.label = fi.first, .kind = "variable", .detail = ": int"});
@@ -1233,7 +1305,8 @@ void addLocalScopeCompletions(const WalkCtx &scope, std::vector<CompletionEntry>
       if (const auto *vd = std::get_if<VarDeclStmt>(&stmtPtr->data)) {
         if (seen.insert(vd->name).second) {
           std::string detail = vd->typeText ? (": " + *vd->typeText) : "";
-          items.push_back(CompletionEntry{.label = vd->name, .kind = "variable", .detail = detail});
+          if (vd->typeText && looksLikeFunctionTypeText(*vd->typeText)) items.push_back(callableEntry(vd->name, "variable", detail));
+          else items.push_back(CompletionEntry{.label = vd->name, .kind = "variable", .detail = detail});
         }
       }
     }
@@ -1343,14 +1416,15 @@ std::vector<CompletionEntry> completionItems(const Block &program, const std::st
             using T = std::decay_t<decltype(n)>;
             if constexpr (std::is_same_v<T, FuncDeclStmt>) {
               std::string ret = n.returnTypeText ? (": " + *n.returnTypeText) : "";
-              items.push_back(CompletionEntry{.label = n.name, .kind = "function", .detail = "(" + formatParams(n.params) + ")" + ret});
+              items.push_back(callableEntry(n.name, "function", "(" + formatParams(n.params) + ")" + ret));
             } else if constexpr (std::is_same_v<T, StructDeclStmt>) {
               items.push_back(CompletionEntry{.label = n.name, .kind = "struct", .detail = "struct"});
             } else if constexpr (std::is_same_v<T, EnumDeclStmt>) {
               items.push_back(CompletionEntry{.label = n.name, .kind = "enum", .detail = "enum"});
             } else if constexpr (std::is_same_v<T, VarDeclStmt>) {
               std::string ty = n.typeText ? *n.typeText : "(inferred)";
-              items.push_back(CompletionEntry{.label = n.name, .kind = "variable", .detail = ": " + ty});
+              if (n.typeText && looksLikeFunctionTypeText(*n.typeText)) items.push_back(callableEntry(n.name, "variable", ": " + ty));
+              else items.push_back(CompletionEntry{.label = n.name, .kind = "variable", .detail = ": " + ty});
             } else if constexpr (std::is_same_v<T, NamespaceStmt>) {
               items.push_back(CompletionEntry{.label = n.name, .kind = "namespace", .detail = "namespace"});
             }
@@ -1371,7 +1445,7 @@ std::vector<CompletionEntry> completionItems(const Block &program, const std::st
       if (!name.starts_with(dotPrefix) || overloads.empty()) continue;
       const FuncDeclStmt &f = *overloads.front().decl;
       std::string ret = f.returnTypeText ? (": " + *f.returnTypeText) : "";
-      items.push_back(CompletionEntry{.label = name.substr(dotPrefix.size()), .kind = "function", .detail = "(" + formatParams(f.params) + ")" + ret});
+      items.push_back(callableEntry(name.substr(dotPrefix.size()), "function", "(" + formatParams(f.params) + ")" + ret));
     }
     for (const auto &[name, s] : idx.structs) {
       if (name.starts_with(dotPrefix)) items.push_back(CompletionEntry{.label = name.substr(dotPrefix.size()), .kind = "struct", .detail = "struct"});
@@ -1382,7 +1456,9 @@ std::vector<CompletionEntry> completionItems(const Block &program, const std::st
     for (const auto &[name, v] : idx.vars) {
       if (!name.starts_with(dotPrefix)) continue;
       std::string ty = v.decl->typeText ? *v.decl->typeText : "(inferred)";
-      items.push_back(CompletionEntry{.label = name.substr(dotPrefix.size()), .kind = "variable", .detail = ": " + ty});
+      std::string label = name.substr(dotPrefix.size());
+      if (v.decl->typeText && looksLikeFunctionTypeText(*v.decl->typeText)) items.push_back(callableEntry(label, "variable", ": " + ty));
+      else items.push_back(CompletionEntry{.label = label, .kind = "variable", .detail = ": " + ty});
     }
     return items;
   }
@@ -1403,13 +1479,14 @@ std::vector<CompletionEntry> completionItems(const Block &program, const std::st
     if (overloads.empty()) continue;
     const FuncDeclStmt &f = *overloads.front().decl;
     std::string ret = f.returnTypeText ? (": " + *f.returnTypeText) : "";
-    items.push_back(CompletionEntry{.label = name, .kind = "function", .detail = "(" + formatParams(f.params) + ")" + ret});
+    items.push_back(callableEntry(name, "function", "(" + formatParams(f.params) + ")" + ret));
   }
   for (const auto &[name, s] : idx.structs) items.push_back(CompletionEntry{.label = name, .kind = "struct", .detail = "struct"});
   for (const auto &[name, e] : idx.enums) items.push_back(CompletionEntry{.label = name, .kind = "enum", .detail = "enum"});
   for (const auto &[name, v] : idx.vars) {
     std::string ty = v.decl->typeText ? *v.decl->typeText : "(inferred)";
-    items.push_back(CompletionEntry{.label = name, .kind = "variable", .detail = ": " + ty});
+    if (v.decl->typeText && looksLikeFunctionTypeText(*v.decl->typeText)) items.push_back(callableEntry(name, "variable", ": " + ty));
+    else items.push_back(CompletionEntry{.label = name, .kind = "variable", .detail = ": " + ty});
   }
   for (const auto &[name, ns] : idx.namespaces) items.push_back(CompletionEntry{.label = name, .kind = "namespace", .detail = "namespace"});
 
