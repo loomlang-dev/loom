@@ -334,9 +334,11 @@ std::unique_ptr<Expr> Parser::parseCast() {
   while (check(TokenKind::KwAs)) {
     const Token &opTok = peek();
     advance();
+    bool isForce = check(TokenKind::Bang);
+    if (isForce) advance();
     SourceLoc typeLoc;
     std::string typeText = parseTypeText(typeLoc);
-    expr = makeExpr(opTok, CastExpr{.expression = std::move(expr), .typeText = std::move(typeText), .typeLoc = typeLoc});
+    expr = makeExpr(opTok, CastExpr{.expression = std::move(expr), .typeText = std::move(typeText), .typeLoc = typeLoc, .isForce = isForce});
   }
   return expr;
 }
@@ -1278,7 +1280,7 @@ static void print(const Expr &e, std::string &out) {
       } else if constexpr (std::is_same_v<T, CastExpr>) {
         out += "(";
         printChild(n.expression, out);
-        out += " as " + n.typeText + ")";
+        out += (n.isForce ? " as! " : " as ") + n.typeText + ")";
       } else if constexpr (std::is_same_v<T, StructExpr>) {
         out += n.name + "{";
         for (size_t i = 0; i < n.fields.size(); i++) {

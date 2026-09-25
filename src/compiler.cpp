@@ -53,12 +53,12 @@ Compiler::Compiler(
 Compiler::~Compiler() = default;
 
 void Compiler::registerDefaultTypeHandlers() {
+  typeRegistry->registerHandler(*this, createEnumHandler());
   typeRegistry->registerHandler(*this, createIntegerHandler());
   typeRegistry->registerHandler(*this, createFloatHandler());
   typeRegistry->registerHandler(*this, createBooleanHandler());
   typeRegistry->registerHandler(*this, createStringHandler());
   typeRegistry->registerHandler(*this, createListHandler());
-  typeRegistry->registerHandler(*this, createEnumHandler());
   typeRegistry->registerHandler(*this, createStructHandler());
   typeRegistry->registerHandler(*this, createMapHandler());
 }

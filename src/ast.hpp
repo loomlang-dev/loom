@@ -99,6 +99,7 @@ struct CastExpr {
   std::unique_ptr<Expr> expression;
   std::string typeText;
   SourceLoc typeLoc;
+  bool isForce = false;
 };
 
 struct StructExprField {

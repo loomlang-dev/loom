@@ -428,7 +428,7 @@ module.exports = grammar({
         8,
         seq(
           field("expression", $._expression),
-          "as",
+          field("operator", choice("as", "as!")),
           field("type", $.type),
         ),
       ),

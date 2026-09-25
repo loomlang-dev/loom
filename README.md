@@ -22,7 +22,7 @@ A programming language that compiles to Minecraft datapacks.
 - [x] Package Management
 - [x] Function references
 - [x] Struct methods (and constructor)
-- [ ] Force casting (e.g. `int`/`string`/`float` -> `enum`, `string` ->
+- [x] Force casting (e.g. `int`/`string`/`float` -> `enum`, `string` ->
       `(int, int) -> int`)
 - [ ] Custom type definitions
 - [ ] Data access

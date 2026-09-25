@@ -70,6 +70,19 @@ for f in "$TEST_DIR"/*.loom; do
     fi
   fi
 
+  if [ "$name" = "test_force_cast" ]; then
+    if ! grep -rq "internal_call_ref_int" "$od/data"; then
+      echo "FAIL: $name did not emit the indirect-call helper for the force-cast-to-function-type call"
+      failures=$((failures+1))
+      continue
+    fi
+    if ! grep -rq 'set value "loom_test:internal/add"' "$od/data"; then
+      echo "FAIL: $name did not compile the force-cast string literal through unchanged"
+      failures=$((failures+1))
+      continue
+    fi
+  fi
+
   if [ "$name" = "test_number_provider" ]; then
     if ! grep -rq "run compute default integer" "$od/data"; then
       echo "FAIL: $name did not emit a collapsed integer number-provider /compute"

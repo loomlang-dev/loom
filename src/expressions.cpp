@@ -1563,13 +1563,33 @@ Compiler::ExpressionData Compiler::compileExpressionImpl(const Expr &node, unsig
 
         if (subExpr.type == targetType) return subExpr;
 
+        if (n.isForce) {
+          auto representationClass = [](const Type &t) -> int {
+            if (t.isInteger() || t.isBoolean()) return 0;
+            if (t.isFloat()) return 1;
+            if (t.isString()) return 2;
+            return -1;
+          };
+          const int srcClass = representationClass(subExpr.type);
+          const int dstClass = representationClass(targetType);
+          if (srcClass != -1 && srcClass == dstClass) {
+            ExpressionData ret = subExpr;
+            ret.type = targetType;
+            ret.branchCondition = std::nullopt;
+            return ret;
+          }
+        }
+
         if (TypeHandler *handler = getHandler(subExpr.type)) {
           if (auto optResult = handler->compileCast(*this, subExpr, targetType, id, precompute, node.loc)) {
             return optResult.value();
           }
         }
 
-        throw std::runtime_error(formatError(node.loc, "Cannot cast from given type to target type."));
+        throw std::runtime_error(formatError(
+          node.loc,
+          n.isForce ? "Cannot force-cast from given type to target type; their underlying representations are not compatible." : "Cannot cast from given type to target type."
+        ));
       }
 
       else if constexpr (std::is_same_v<T, AtTestExpr>) {

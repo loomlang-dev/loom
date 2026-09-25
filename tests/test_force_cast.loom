@@ -1,0 +1,28 @@
+enum Color {
+  Red = 0,
+  Green = 1,
+  Blue = 2
+}
+
+enum Name {
+  Alice = "alice",
+  Bob = "bob"
+}
+
+func add(a: int, b: int): int {
+  return a + b
+}
+
+func main() {
+  let n: int = 1;
+  let c: Color = n as! Color;
+  let backToInt: int = c as int;
+
+  let s: string = "bob";
+  let nm: Name = s as! Name;
+
+  let fnRef: (int, int) -> int = "loom_test:internal/add" as! (int, int) -> int;
+  let called: int = fnRef(2, 3);
+
+  say ${backToInt} ${c} ${nm} ${called};
+}

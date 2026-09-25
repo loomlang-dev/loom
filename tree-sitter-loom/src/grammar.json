@@ -2086,8 +2086,21 @@
             }
           },
           {
-            "type": "STRING",
-            "value": "as"
+            "type": "FIELD",
+            "name": "operator",
+            "content": {
+              "type": "CHOICE",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": "as"
+                },
+                {
+                  "type": "STRING",
+                  "value": "as!"
+                }
+              ]
+            }
           },
           {
             "type": "FIELD",

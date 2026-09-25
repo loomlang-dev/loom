@@ -529,6 +529,20 @@
           }
         ]
       },
+      "operator": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "as",
+            "named": false
+          },
+          {
+            "type": "as!",
+            "named": false
+          }
+        ]
+      },
       "type": {
         "multiple": false,
         "required": true,
@@ -4182,6 +4196,10 @@
   },
   {
     "type": "as",
+    "named": false
+  },
+  {
+    "type": "as!",
     "named": false
   },
   {
