@@ -138,6 +138,7 @@ int symbolKindFor(const std::string &kind) {
   if (kind == "method") return 6;
   if (kind == "enum") return 10;
   if (kind == "enum-member") return 22;
+  if (kind == "type-alias") return 26;
   if (kind == "namespace") return 3;
   return 13; // variable
 }
@@ -157,6 +158,7 @@ int completionKindFor(const std::string &kind) {
   if (kind == "struct") return 22;
   if (kind == "enum") return 13;
   if (kind == "enum-member") return 20;
+  if (kind == "type") return 25; // TypeParameter
   if (kind == "field") return 5;
   if (kind == "method") return 2;
   if (kind == "namespace") return 9;

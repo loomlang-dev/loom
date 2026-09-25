@@ -63,6 +63,7 @@ struct GlobalIndex {
   std::unordered_map<std::string, std::vector<Tagged<FuncDeclStmt>>> funcs;
   std::unordered_map<std::string, Tagged<StructDeclStmt>> structs;
   std::unordered_map<std::string, Tagged<EnumDeclStmt>> enums;
+  std::unordered_map<std::string, Tagged<TypeAliasDeclStmt>> typeAliases;
   std::unordered_map<std::string, Tagged<VarDeclStmt>> vars;
   std::unordered_map<std::string, const NamespaceStmt *> namespaces;
 };
@@ -102,6 +103,11 @@ void indexBlock(
           if (filter == FilterMode::ExternOnly && !n.isExtern) return;
           idx.enums.emplace(prefix + n.name, Tagged<EnumDeclStmt>{&n, file});
           if (!prefix.empty()) idx.enums.emplace(n.name, Tagged<EnumDeclStmt>{&n, file});
+        } else if constexpr (std::is_same_v<T, TypeAliasDeclStmt>) {
+          if (filter == FilterMode::ExportOnly && !n.isExport) return;
+          if (filter == FilterMode::ExternOnly && !n.isExtern) return;
+          idx.typeAliases.emplace(prefix + n.name, Tagged<TypeAliasDeclStmt>{&n, file});
+          if (!prefix.empty()) idx.typeAliases.emplace(n.name, Tagged<TypeAliasDeclStmt>{&n, file});
         } else if constexpr (std::is_same_v<T, VarDeclStmt>) {
           if (filter == FilterMode::ExportOnly && !n.isExport) return;
           if (filter == FilterMode::ExternOnly && !n.isExtern) return;
@@ -141,6 +147,7 @@ void indexBlock(
           }
           for (auto &[name, ref] : subIdx.structs) idx.structs.emplace(aliasPrefix + name, ref);
           for (auto &[name, ref] : subIdx.enums) idx.enums.emplace(aliasPrefix + name, ref);
+          for (auto &[name, ref] : subIdx.typeAliases) idx.typeAliases.emplace(aliasPrefix + name, ref);
           for (auto &[name, ref] : subIdx.vars) idx.vars.emplace(aliasPrefix + name, ref);
         }
       },
@@ -164,6 +171,10 @@ const Tagged<StructDeclStmt> *lookupStruct(const GlobalIndex &idx, const std::st
 const Tagged<EnumDeclStmt> *lookupEnum(const GlobalIndex &idx, const std::string &name) {
   auto it = idx.enums.find(name);
   return it == idx.enums.end() ? nullptr : &it->second;
+}
+const Tagged<TypeAliasDeclStmt> *lookupTypeAlias(const GlobalIndex &idx, const std::string &name) {
+  auto it = idx.typeAliases.find(name);
+  return it == idx.typeAliases.end() ? nullptr : &it->second;
 }
 const StructMethodDecl *findMethod(const StructDeclStmt &s, const std::string &name) {
   for (const auto &m : s.methods) {
@@ -418,6 +429,9 @@ std::optional<Resolved> resolveTypeRef(const GlobalIndex &idx, const std::string
   if (const Tagged<EnumDeclStmt> *e = lookupEnum(idx, base)) {
     return Resolved{.targetLoc = e->decl->nameLoc, .file = e->file, .hover = wrap("enum " + e->decl->name)};
   }
+  if (const Tagged<TypeAliasDeclStmt> *a = lookupTypeAlias(idx, base)) {
+    return Resolved{.targetLoc = a->decl->nameLoc, .file = a->file, .hover = wrap("type " + a->decl->name + " = " + a->decl->typeText)};
+  }
   static const std::unordered_set<std::string> primitives = {"int", "float", "bool", "string"};
   if (primitives.count(base)) return Resolved{.targetLoc = loc, .hover = wrap("type " + base)};
   return std::nullopt;
@@ -588,6 +602,18 @@ bool walkStmt(const Stmt &stmt, WalkCtx ctx, const GlobalIndex &idx, uint32_t of
           if (inSpan(v.nameLoc, offset)) {
             std::string valStr = v.value ? (" = " + exprToString(**v.value)) : "";
             out = Resolved{.targetLoc = v.nameLoc, .hover = wrap("(enum variant) " + n.name + "." + v.name + valStr)};
+            return true;
+          }
+        }
+        return false;
+      } else if constexpr (std::is_same_v<T, TypeAliasDeclStmt>) {
+        if (inSpan(n.nameLoc, offset)) {
+          out = Resolved{.targetLoc = n.nameLoc, .hover = wrap("type " + n.name + " = " + n.typeText)};
+          return true;
+        }
+        if (inSpan(n.typeLoc, offset)) {
+          if (auto r = resolveTypeRef(idx, n.typeText, n.typeLoc)) {
+            out = r;
             return true;
           }
         }
@@ -896,6 +922,9 @@ void collectStmtTokens(const Stmt &stmt, WalkCtx ctx, const GlobalIndex &idx, st
           out.push_back(SemanticToken{.loc = v.nameLoc, .kind = "enumMember"});
           if (v.value) collectExprTokens(**v.value, ctx, idx, out);
         }
+      } else if constexpr (std::is_same_v<T, TypeAliasDeclStmt>) {
+        out.push_back(SemanticToken{.loc = n.nameLoc, .kind = "type"});
+        addTypeToken(idx, n.typeText, n.typeLoc, out);
       } else if constexpr (std::is_same_v<T, NamespaceStmt>) {
         out.push_back(SemanticToken{.loc = n.nameLoc, .kind = "namespace"});
         collectBlockTokens(*n.body, ctx, idx, out);
@@ -962,6 +991,8 @@ void collectSymbols(const Block &block, std::vector<SymbolEntry> &out) {
           SymbolEntry entry{.name = n.name, .kind = "enum", .loc = n.nameLoc};
           for (const auto &v : n.variants) entry.children.push_back(SymbolEntry{.name = v.name, .kind = "enum-member", .loc = v.nameLoc});
           out.push_back(std::move(entry));
+        } else if constexpr (std::is_same_v<T, TypeAliasDeclStmt>) {
+          out.push_back(SymbolEntry{.name = n.name, .kind = "type-alias", .loc = n.nameLoc});
         } else if constexpr (std::is_same_v<T, NamespaceStmt>) {
           SymbolEntry entry{.name = n.name, .kind = "namespace", .loc = n.nameLoc};
           collectSymbols(*n.body, entry.children);
@@ -973,7 +1004,7 @@ void collectSymbols(const Block &block, std::vector<SymbolEntry> &out) {
   }
 }
 
-const char *DECLARATION_KEYWORDS[] = {"let", "const", "struct", "enum", "func", "import", "export", "extern", "namespace", "@entity"};
+const char *DECLARATION_KEYWORDS[] = {"let", "const", "struct", "enum", "type", "func", "import", "export", "extern", "namespace", "@entity"};
 
 const char *CONTROL_FLOW_KEYWORDS[] = {"if", "while", "do", "for", "return", "as", "at", "align", "anchored", "facing", "positioned", "rotated", "on"};
 
@@ -1361,6 +1392,7 @@ std::vector<CompletionEntry> completionItems(const Block &program, const std::st
     items.push_back(CompletionEntry{.label = "map", .kind = "keyword", .detail = "map<K, V>"});
     for (const auto &[name, s] : idx.structs) items.push_back(CompletionEntry{.label = name, .kind = "struct", .detail = "struct"});
     for (const auto &[name, e] : idx.enums) items.push_back(CompletionEntry{.label = name, .kind = "enum", .detail = "enum"});
+    for (const auto &[name, a] : idx.typeAliases) items.push_back(CompletionEntry{.label = name, .kind = "type", .detail = "type = " + a.decl->typeText});
     for (const auto &[name, ns] : idx.namespaces) items.push_back(CompletionEntry{.label = name, .kind = "namespace", .detail = "namespace"});
     return items;
   }
@@ -1421,6 +1453,8 @@ std::vector<CompletionEntry> completionItems(const Block &program, const std::st
               items.push_back(CompletionEntry{.label = n.name, .kind = "struct", .detail = "struct"});
             } else if constexpr (std::is_same_v<T, EnumDeclStmt>) {
               items.push_back(CompletionEntry{.label = n.name, .kind = "enum", .detail = "enum"});
+            } else if constexpr (std::is_same_v<T, TypeAliasDeclStmt>) {
+              items.push_back(CompletionEntry{.label = n.name, .kind = "type", .detail = "type = " + n.typeText});
             } else if constexpr (std::is_same_v<T, VarDeclStmt>) {
               std::string ty = n.typeText ? *n.typeText : "(inferred)";
               if (n.typeText && looksLikeFunctionTypeText(*n.typeText)) items.push_back(callableEntry(n.name, "variable", ": " + ty));
@@ -1453,6 +1487,9 @@ std::vector<CompletionEntry> completionItems(const Block &program, const std::st
     for (const auto &[name, e] : idx.enums) {
       if (name.starts_with(dotPrefix)) items.push_back(CompletionEntry{.label = name.substr(dotPrefix.size()), .kind = "enum", .detail = "enum"});
     }
+    for (const auto &[name, a] : idx.typeAliases) {
+      if (name.starts_with(dotPrefix)) items.push_back(CompletionEntry{.label = name.substr(dotPrefix.size()), .kind = "type", .detail = "type = " + a.decl->typeText});
+    }
     for (const auto &[name, v] : idx.vars) {
       if (!name.starts_with(dotPrefix)) continue;
       std::string ty = v.decl->typeText ? *v.decl->typeText : "(inferred)";
@@ -1483,6 +1520,7 @@ std::vector<CompletionEntry> completionItems(const Block &program, const std::st
   }
   for (const auto &[name, s] : idx.structs) items.push_back(CompletionEntry{.label = name, .kind = "struct", .detail = "struct"});
   for (const auto &[name, e] : idx.enums) items.push_back(CompletionEntry{.label = name, .kind = "enum", .detail = "enum"});
+  for (const auto &[name, a] : idx.typeAliases) items.push_back(CompletionEntry{.label = name, .kind = "type", .detail = "type = " + a.decl->typeText});
   for (const auto &[name, v] : idx.vars) {
     std::string ty = v.decl->typeText ? *v.decl->typeText : "(inferred)";
     if (v.decl->typeText && looksLikeFunctionTypeText(*v.decl->typeText)) items.push_back(callableEntry(name, "variable", ": " + ty));

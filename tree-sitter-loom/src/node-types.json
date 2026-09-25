@@ -424,6 +424,10 @@
           "named": true
         },
         {
+          "type": "type_alias_definition",
+          "named": true
+        },
+        {
           "type": "variable_declaration",
           "named": true
         },
@@ -2440,6 +2444,10 @@
           "named": true
         },
         {
+          "type": "type_alias_definition",
+          "named": true
+        },
+        {
           "type": "variable_declaration",
           "named": true
         },
@@ -3110,6 +3118,10 @@
           "named": true
         },
         {
+          "type": "type_alias_definition",
+          "named": true
+        },
+        {
           "type": "variable_declaration",
           "named": true
         },
@@ -3656,6 +3668,32 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "type_alias_definition",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "type": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "type",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -4393,6 +4431,10 @@
   },
   {
     "type": "true",
+    "named": false
+  },
+  {
+    "type": "type",
     "named": false
   },
   {

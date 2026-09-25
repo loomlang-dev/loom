@@ -11,5 +11,8 @@ func main() {
   let color: example_lib::Color = example_lib::Color.Blue;
   let colorValue: int = example_lib::colorValue(color);
 
-  say ${sum} ${example_lib::counter} ${greeting} ${colorValue};
+  let op: example_lib::IntOp = example_lib::add;
+  let opResult: int = op(5, 6);
+
+  say ${sum} ${example_lib::counter} ${greeting} ${colorValue} ${opResult};
 }

@@ -21,6 +21,8 @@ const char *tokenKindName(TokenKind kind) {
     return "struct";
   case TokenKind::KwEnum:
     return "enum";
+  case TokenKind::KwType:
+    return "type";
   case TokenKind::KwFunc:
     return "func";
   case TokenKind::KwIf:
@@ -136,7 +138,7 @@ static const std::unordered_map<std::string_view, TokenKind> &keywordTable() {
     {"let", TokenKind::KwLet},       {"const", TokenKind::KwConst},         {"struct", TokenKind::KwStruct}, {"enum", TokenKind::KwEnum},   {"func", TokenKind::KwFunc},
     {"if", TokenKind::KwIf},         {"else", TokenKind::KwElse},           {"while", TokenKind::KwWhile},   {"do", TokenKind::KwDo},       {"for", TokenKind::KwFor},
     {"in", TokenKind::KwIn},         {"return", TokenKind::KwReturn},       {"import", TokenKind::KwImport}, {"as", TokenKind::KwAs},       {"export", TokenKind::KwExport},
-    {"extern", TokenKind::KwExtern}, {"namespace", TokenKind::KwNamespace}, {"true", TokenKind::KwTrue},     {"false", TokenKind::KwFalse},
+    {"extern", TokenKind::KwExtern}, {"namespace", TokenKind::KwNamespace}, {"true", TokenKind::KwTrue},     {"false", TokenKind::KwFalse}, {"type", TokenKind::KwType},
   };
   return table;
 }

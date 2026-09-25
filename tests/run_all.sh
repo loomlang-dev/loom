@@ -70,6 +70,14 @@ for f in "$TEST_DIR"/*.loom; do
     fi
   fi
 
+  if [ "$name" = "test_type_alias" ]; then
+    if ! grep -rq "internal_call_ref_int" "$od/data"; then
+      echo "FAIL: $name did not emit the indirect-call helper for the function-type alias call"
+      failures=$((failures+1))
+      continue
+    fi
+  fi
+
   if [ "$name" = "test_force_cast" ]; then
     if ! grep -rq "internal_call_ref_int" "$od/data"; then
       echo "FAIL: $name did not emit the indirect-call helper for the force-cast-to-function-type call"
@@ -157,6 +165,14 @@ for d in "$PROJECTS_DIR"/*/; do
     echo "FAIL: $name should emit a data/example_lib folder (dependency was embedded)"
     failures=$((failures+1))
     continue
+  fi
+
+  if [ "$name" = "dep_normal" ]; then
+    if ! grep -rq '"example_lib:add' "$od/data"; then
+      echo "FAIL: $name did not resolve the dependency's extern type alias (example_lib::IntOp) to a working function reference"
+      failures=$((failures+1))
+      continue
+    fi
   fi
 
   if [ "$name" = "func_ref_dep" ]; then

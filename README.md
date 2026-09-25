@@ -24,7 +24,7 @@ A programming language that compiles to Minecraft datapacks.
 - [x] Struct methods (and constructor)
 - [x] Force casting (e.g. `int`/`string`/`float` -> `enum`, `string` ->
       `(int, int) -> int`)
-- [ ] Custom type definitions
+- [x] Custom type definitions
 - [ ] Data access
 - [ ] Classes
 - [ ] Operater overloading
@@ -34,7 +34,7 @@ A programming language that compiles to Minecraft datapacks.
 - [ ] CLI Utils
 - [ ] Bitwise
 - [x] C++-based parser (allowing for improved error detection)
+- [ ] `try` and `catch`
 - [ ] `any` type
 - [ ] Variant types
 - [x] C++-based language server
-- [ ] `comptime` keyword

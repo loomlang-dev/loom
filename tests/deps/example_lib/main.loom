@@ -4,6 +4,8 @@ extern func add(a: int, b: int): int {
 
 extern let counter: int = 0;
 
+extern type IntOp = (int, int) -> int;
+
 extern enum Color {
   Red = 0,
   Green = 1,

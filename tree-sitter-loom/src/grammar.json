@@ -38,6 +38,10 @@
             },
             {
               "type": "SYMBOL",
+              "name": "type_alias_definition"
+            },
+            {
+              "type": "SYMBOL",
               "name": "variable_declaration"
             },
             {
@@ -335,6 +339,59 @@
               "type": "BLANK"
             }
           ]
+        }
+      ]
+    },
+    "type_alias_definition": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "STRING",
+              "value": "export"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "STRING",
+              "value": "extern"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "STRING",
+          "value": "type"
+        },
+        {
+          "type": "FIELD",
+          "name": "name",
+          "content": {
+            "type": "SYMBOL",
+            "name": "identifier"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "="
+        },
+        {
+          "type": "FIELD",
+          "name": "type",
+          "content": {
+            "type": "SYMBOL",
+            "name": "type"
+          }
         }
       ]
     },
@@ -3456,6 +3513,7 @@
     [
       "enum_definition",
       "struct_definition",
+      "type_alias_definition",
       "_modifier"
     ],
     [

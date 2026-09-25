@@ -628,6 +628,7 @@ void Parser::synchronize() {
     case TokenKind::KwFunc:
     case TokenKind::KwStruct:
     case TokenKind::KwEnum:
+    case TokenKind::KwType:
     case TokenKind::KwImport:
     case TokenKind::KwNamespace:
     case TokenKind::KwIf:
@@ -918,6 +919,20 @@ std::unique_ptr<Stmt> Parser::parseEnumDecl(bool isExport, bool isExtern) {
   return makeStmt(startTok, EnumDeclStmt{.isExport = isExport, .isExtern = isExtern, .name = std::move(name), .nameLoc = nameLoc, .variants = std::move(variants)});
 }
 
+std::unique_ptr<Stmt> Parser::parseTypeAliasDecl(bool isExport, bool isExtern) {
+  const Token &startTok = peek();
+  advance();
+  const Token &nameTok = expect(TokenKind::Identifier, "type alias name");
+  std::string name(nameTok.text);
+  SourceLoc nameLoc = locOf(nameTok);
+  expect(TokenKind::Eq, "'=' in type alias declaration");
+  SourceLoc typeLoc;
+  std::string typeText = parseTypeText(typeLoc);
+  return makeStmt(
+    startTok, TypeAliasDeclStmt{.isExport = isExport, .isExtern = isExtern, .name = std::move(name), .nameLoc = nameLoc, .typeText = std::move(typeText), .typeLoc = typeLoc}
+  );
+}
+
 std::unique_ptr<Stmt> Parser::parseNamespaceDecl() {
   const Token &startTok = peek();
   advance();
@@ -1175,13 +1190,16 @@ std::unique_ptr<Stmt> Parser::parseStatement() {
   } else if (check(TokenKind::KwStruct)) {
     if (tag.has_value()) error(peek(), "'struct' cannot be preceded by a tag");
     stmt = parseStructDecl(isExport, isExtern);
+  } else if (check(TokenKind::KwType)) {
+    if (tag.has_value()) error(peek(), "'type' cannot be preceded by a tag");
+    stmt = parseTypeAliasDecl(isExport, isExtern);
   } else if (check(TokenKind::KwLet) || check(TokenKind::KwConst)) {
     if (tag.has_value()) error(peek(), "Variable declarations cannot be preceded by a tag");
     stmt = parseVarDecl(isExport, isExtern, isEntityLocal);
   } else if (check(TokenKind::KwFunc)) {
     stmt = parseFuncDecl(tag, isExport, isExtern);
   } else if (tag.has_value() || isExport || isExtern || isEntityLocal) {
-    error(peek(), "Expected a declaration ('func', 'let', 'const', 'struct', or 'enum') after a tag/modifier");
+    error(peek(), "Expected a declaration ('func', 'let', 'const', 'struct', 'enum', or 'type') after a tag/modifier");
   } else if (check(TokenKind::KwIf)) {
     stmt = parseIf();
   } else if (check(TokenKind::KwWhile)) {

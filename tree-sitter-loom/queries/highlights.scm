@@ -4,7 +4,7 @@
 ["export" "extern"] @keyword.storage
 "@entity" @attribute
 ["public" "private" "static"] @keyword.storage
-["let" "const" "enum" "struct" "namespace"] @keyword.storage
+["let" "const" "enum" "struct" "type" "namespace"] @keyword.storage
 (map_type "map" @type.builtin)
 (map_expression "map" @type.builtin)
 ["if" "else"] @keyword.conditional
@@ -35,6 +35,7 @@
 (struct_field name: (identifier) @property)
 (struct_method name: (identifier) @method)
 (enum_definition name: (identifier) @type)
+(type_alias_definition name: (identifier) @type)
 (enum_variant name: (identifier) @constant)
 
 (property_access property: (identifier) @property)

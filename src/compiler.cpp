@@ -187,6 +187,8 @@ Compiler::Type Compiler::parseTypeFromString(const std::string &typeText) const 
   if (it != enums.end()) return Type::EnumTypeOf(&it->second);
   const auto itStruct = findInMap(structs, t);
   if (itStruct != structs.end()) return Type::StructTypeOf(&itStruct->second);
+  const auto itAlias = findInMap(typeAliases, t);
+  if (itAlias != typeAliases.end()) return itAlias->second.type;
   throw std::runtime_error(std::format("Unknown type: {}", t));
 }
 
@@ -708,6 +710,8 @@ void Compiler::processDeclarations(const Block &block) {
           runRecoverable(stmt, [&] { processEnumDecl(node, stmt.loc); });
         } else if constexpr (std::is_same_v<T, StructDeclStmt>) {
           runRecoverable(stmt, [&] { processStructDecl(node, stmt.loc); });
+        } else if constexpr (std::is_same_v<T, TypeAliasDeclStmt>) {
+          runRecoverable(stmt, [&] { processTypeAliasDecl(node, stmt.loc); });
         } else if constexpr (std::is_same_v<T, FuncDeclStmt>) {
           runRecoverable(stmt, [&] { processFuncDeclDeclaration(node, stmt.loc); });
         }
@@ -822,6 +826,18 @@ void Compiler::processImportDecl(const ImportStmt &decl, SourceLoc loc) {
     structs[importedName] = structData;
     structs[importedName].name = importedName;
     structs[importedName].exported = false;
+  }
+
+  for (const auto &[name, aliasData] : importCompiler.typeAliases) {
+    if (!aliasData.exported) continue;
+    std::string importedName = aliasName.empty() ? name : aliasName + "::" + name;
+    if (typeAliases.contains(importedName)) {
+      throw std::runtime_error("Compilation Error: Imported type alias '" + importedName + "' collides with an existing type alias.");
+    }
+
+    typeAliases[importedName] = aliasData;
+    typeAliases[importedName].name = importedName;
+    typeAliases[importedName].exported = false;
   }
 
   for (const auto &func : importCompiler.internalFunctions) {
@@ -966,6 +982,18 @@ void Compiler::processDependencyImportDecl(const ImportStmt &decl, SourceLoc loc
     enums[importedName].exported = false;
   }
 
+  for (const auto &[name, aliasData] : depCompiler.typeAliases) {
+    if (!aliasData.isExtern) continue;
+    std::string importedName = prefix + name;
+    if (typeAliases.contains(importedName)) {
+      throw std::runtime_error(formatError(loc, "Dependency type alias '" + importedName + "' collides with an existing type alias."));
+    }
+
+    typeAliases[importedName] = aliasData;
+    typeAliases[importedName].name = importedName;
+    typeAliases[importedName].exported = false;
+  }
+
   if (!isEmbedded) return;
 
   for (const auto &func : depCompiler.internalFunctions) {
@@ -1045,6 +1073,32 @@ void Compiler::processEnumDecl(const EnumDeclStmt &decl, SourceLoc loc) {
   }
 
   enums[fullEnumName] = enumData;
+}
+
+void Compiler::processTypeAliasDecl(const TypeAliasDeclStmt &decl, SourceLoc loc) {
+  if (isBuiltin(decl.name)) throw std::runtime_error(formatError(loc, "Reserved name."));
+
+  std::string fullName = prefixName(decl.name);
+
+  if (decl.isExtern) {
+    static std::unordered_set<std::string> globalExternTypeAliases;
+    std::string globalKey = datapackNamespace + ":" + fullName;
+    if (globalExternTypeAliases.contains(globalKey)) {
+      throw std::runtime_error(
+        formatError(loc, "Extern type alias '" + decl.name + "' is already defined elsewhere. Multiple definitions of the same extern type alias are not allowed.")
+      );
+    }
+    globalExternTypeAliases.insert(globalKey);
+  }
+
+  Type resolved;
+  try {
+    resolved = parseTypeFromString(decl.typeText);
+  } catch (const std::exception &e) {
+    throw std::runtime_error(formatError(loc, "Cannot resolve type alias '" + decl.name + "': " + e.what()));
+  }
+
+  typeAliases[fullName] = TypeAliasData{.name = fullName, .type = std::move(resolved), .exported = decl.isExport, .isExtern = decl.isExtern};
 }
 
 void Compiler::processStructDecl(const StructDeclStmt &decl, SourceLoc loc) {
@@ -1200,7 +1254,7 @@ void Compiler::processCompilation(const Block &block) {
           runRecoverable(stmt, [&] { compileFuncDecl(node, stmt.loc); });
         } else if constexpr (std::is_same_v<T, StructDeclStmt>) {
           runRecoverable(stmt, [&] { compileStructDecl(node, stmt.loc); });
-        } else if constexpr (std::is_same_v<T, EnumDeclStmt> || std::is_same_v<T, ImportStmt>) {
+        } else if constexpr (std::is_same_v<T, EnumDeclStmt> || std::is_same_v<T, ImportStmt> || std::is_same_v<T, TypeAliasDeclStmt>) {
 
         } else {
           runRecoverable(stmt, [&] { throw std::runtime_error(formatError(stmt.loc, "Invalid global statement.")); });

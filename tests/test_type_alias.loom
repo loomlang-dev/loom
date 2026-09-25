@@ -1,0 +1,24 @@
+struct Point {
+  x: int
+  y: int
+}
+
+type IntBinOp = (int, int) -> int;
+type Coords = map<string, float>;
+type PointAlias = Point;
+
+func add(a: int, b: int): int {
+  return a + b
+}
+
+func main() {
+  let f: IntBinOp = add;
+  let r: int = f(2, 3);
+
+  let m: Coords = map<string, float>();
+  m["scale"] = 1.5;
+
+  let p: PointAlias = Point { x: 1, y: 2 };
+
+  say ${r} ${m["scale"]} ${p.x} ${p.y};
+}

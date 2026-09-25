@@ -261,6 +261,15 @@ struct EnumDeclStmt {
   std::vector<EnumVariantDecl> variants;
 };
 
+struct TypeAliasDeclStmt {
+  bool isExport = false;
+  bool isExtern = false;
+  std::string name;
+  SourceLoc nameLoc;
+  std::string typeText;
+  SourceLoc typeLoc;
+};
+
 struct NamespaceStmt {
   std::string name;
   SourceLoc nameLoc;
@@ -318,6 +327,7 @@ struct Stmt {
     FuncDeclStmt,
     StructDeclStmt,
     EnumDeclStmt,
+    TypeAliasDeclStmt,
     NamespaceStmt,
     ImportStmt,
     ReturnStmt,

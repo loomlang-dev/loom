@@ -210,6 +210,13 @@ public:
     uint64_t uid = 0;
   };
 
+  struct TypeAliasData {
+    std::string name;
+    Type type;
+    bool exported = false;
+    bool isExtern = false;
+  };
+
   struct FunctionData {
     std::string name;
     std::string mangledName;
@@ -293,6 +300,7 @@ private:
   std::unordered_map<std::string, VariableData> vars;
   std::unordered_map<std::string, EnumData> enums;
   std::unordered_map<std::string, StructData> structs;
+  std::unordered_map<std::string, TypeAliasData> typeAliases;
   std::vector<CompiledFunction> compiledFunctions;
 
   std::vector<std::unique_ptr<Compiler>> importedCompilers;
@@ -329,6 +337,7 @@ private:
   void processCompilation(const Block &block);
   void processStructDecl(const StructDeclStmt &decl, SourceLoc loc);
   void processEnumDecl(const EnumDeclStmt &decl, SourceLoc loc);
+  void processTypeAliasDecl(const TypeAliasDeclStmt &decl, SourceLoc loc);
   void processFuncDeclDeclaration(const FuncDeclStmt &decl, SourceLoc loc);
   void processImportDecl(const ImportStmt &decl, SourceLoc loc);
   void processDependencyImportDecl(const ImportStmt &decl, SourceLoc loc);
