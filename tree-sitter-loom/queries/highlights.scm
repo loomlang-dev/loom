@@ -90,6 +90,7 @@
 "::" @punctuation.delimiter
 (unary_expression operator: _ @operator)
 (binary_expression operator: _ @operator)
+(cast_expression operator: _ @operator)
 (struct_expression name: (namespaced_identifier) @type)
 (struct_expression_field name: (identifier) @property)
 [":" ";" "(" ")" "{" "}" "," "[" "]" "[]" "!"] @punctuation.delimiter
