@@ -1109,7 +1109,22 @@ void Compiler::processStructDecl(const StructDeclStmt &decl, SourceLoc loc) {
   std::string fullStructName = prefixName(decl.name);
   StructData structData = {.name = fullStructName, .exported = decl.isExport, .isExtern = decl.isExtern, .uid = nextTypeUid()};
 
+  if (decl.parentName.has_value()) {
+    auto parentIt = findInMap(structs, *decl.parentName);
+    if (parentIt == structs.end()) {
+      throw std::runtime_error(formatError(decl.parentLoc, "Unknown parent class '" + *decl.parentName + "'; it must be declared earlier in the file."));
+    }
+    structData.parent = &parentIt->second;
+    structData.fields = parentIt->second.fields;
+    structData.vtableMethods = parentIt->second.vtableMethods;
+  }
+
   for (const auto &f : decl.fields) {
+    for (const auto &existing : structData.fields) {
+      if (existing.name == f.name) {
+        throw std::runtime_error(formatError(f.nameLoc, "Field '" + f.name + "' shadows a field already declared on a parent class."));
+      }
+    }
     Type fieldType = parseTypeFromString(f.typeText);
     structData.fields.emplace_back(f.name, std::make_unique<Type>(std::move(fieldType)), f.isPrivate);
   }
@@ -1136,6 +1151,9 @@ void Compiler::processStructDecl(const StructDeclStmt &decl, SourceLoc loc) {
       throw std::runtime_error(
         formatError(methodDecl.loc, "Constructor '" + decl.name + "' must not declare an explicit return type; it implicitly returns " + decl.name + ".")
       );
+    }
+    if (isConstructor && (methodDecl.isVirtual || methodDecl.isOverride)) {
+      throw std::runtime_error(formatError(methodDecl.loc, "Constructor '" + decl.name + "' cannot be 'virtual' or 'override'."));
     }
 
     std::optional<Type> retType = std::nullopt;
@@ -1169,6 +1187,37 @@ void Compiler::processStructDecl(const StructDeclStmt &decl, SourceLoc loc) {
       }
     }
 
+    std::string methodNameLower = methodDecl.name;
+    std::transform(methodNameLower.begin(), methodNameLower.end(), methodNameLower.begin(), ::tolower);
+
+    if ((methodDecl.isVirtual || methodDecl.isOverride) && !funcs[registryKey].empty()) {
+      throw std::runtime_error(formatError(methodDecl.loc, "'" + methodDecl.name + "' is virtual; virtual methods cannot be overloaded."));
+    }
+
+    auto inheritedVtableIt = structPtr->vtableMethods.find(methodNameLower);
+    bool inheritedIsVirtual = inheritedVtableIt != structPtr->vtableMethods.end();
+
+    if (methodDecl.isOverride) {
+      if (!inheritedIsVirtual) {
+        throw std::runtime_error(formatError(methodDecl.loc, "'" + methodDecl.name + "' does not override any virtual method visible on a parent class."));
+      }
+      const FunctionData *base = inheritedVtableIt->second;
+      if (
+        base->params != paramTypes || (base->returnType.has_value() != retType.has_value()) ||
+        (base->returnType.has_value() && retType.has_value() && *base->returnType != *retType)
+      ) {
+        throw std::runtime_error(formatError(methodDecl.loc, "'" + methodDecl.name + "' does not match the signature of the virtual method it overrides."));
+      }
+    } else if (methodDecl.isVirtual && inheritedIsVirtual) {
+      throw std::runtime_error(
+        formatError(methodDecl.loc, "'" + methodDecl.name + "' already overrides a virtual method from a parent class; mark it 'override' instead of 'virtual'.")
+      );
+    } else if (!isConstructor && inheritedIsVirtual) {
+      throw std::runtime_error(
+        formatError(methodDecl.loc, "'" + methodDecl.name + "' shadows a virtual method from a parent class without overriding it; mark it 'override' or rename it.")
+      );
+    }
+
     funcs[registryKey].push_back(
       {.name = registryKey,
        .mangledName = mangledName,
@@ -1182,10 +1231,19 @@ void Compiler::processStructDecl(const StructDeclStmt &decl, SourceLoc loc) {
        .ownerStruct = structPtr,
        .isStatic = methodDecl.isStatic,
        .isConstructor = isConstructor,
-       .isPrivate = methodDecl.isPrivate}
+       .isPrivate = methodDecl.isPrivate,
+       .isVirtual = methodDecl.isVirtual || methodDecl.isOverride}
     );
 
+    if (methodDecl.isVirtual || methodDecl.isOverride) {
+      structPtr->vtableMethods[methodNameLower] = &funcs[registryKey].back();
+    }
+
     if (isConstructor) structPtr->hasConstructor = true;
+  }
+
+  if (!structPtr->vtableMethods.empty() && !structPtr->hasConstructor) {
+    throw std::runtime_error(formatError(loc, "Class '" + decl.name + "' has virtual methods but no constructor; virtual dispatch fields are only set up by a constructor."));
   }
 }
 
@@ -1434,6 +1492,11 @@ void Compiler::compileStructMethod(const StructData &structData, const StructMet
       }
     );
     paramSetup += std::format("data modify storage {}:global vars.{} set value {{}}\n", datapackNamespace, thisMangled);
+
+    for (const auto &[methodNameLower, vFuncData] : structData.vtableMethods) {
+      std::string target = vFuncData->emitNamespace + ":" + (vFuncData->internal ? "internal/" : "") + vFuncData->mangledName;
+      paramSetup += std::format("data modify storage {0}:global vars.{1}.__vtbl_{2} set value \"{3}\"\n", datapackNamespace, thisMangled, methodNameLower, target);
+    }
   } else if (!funcData.isStatic) {
     ParamSetupResult thisResult = setupIncomingParameter("this", Type::RefTypeOf(Type::StructTypeOf(&structData)), blockScope);
     paramSetup += thisResult.setup;

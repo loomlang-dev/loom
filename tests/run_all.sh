@@ -70,6 +70,19 @@ for f in "$TEST_DIR"/*.loom; do
     fi
   fi
 
+  if [ "$name" = "test_classes" ]; then
+    if ! grep -rq "__vtbl_speak" "$od/data"; then
+      echo "FAIL: $name did not emit a vtable field for the virtual method"
+      failures=$((failures+1))
+      continue
+    fi
+    if ! grep -rq "internal_call_ref" "$od/data"; then
+      echo "FAIL: $name did not emit an indirect call for the virtual method dispatch"
+      failures=$((failures+1))
+      continue
+    fi
+  fi
+
   if [ "$name" = "test_data_access" ]; then
     if ! grep -rq "set from entity @s Health" "$od/data"; then
       echo "FAIL: $name did not emit a direct entity NBT read"

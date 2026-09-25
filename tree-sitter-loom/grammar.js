@@ -30,7 +30,8 @@ module.exports = grammar({
     [$.selector],
     [$.namespaced_identifier, $.namespaced_arg],
     [$.struct_field, $.struct_method],
-    [$.enum_definition, $.struct_definition, $.type_alias_definition, $._modifier],
+    [$.struct_field, $.class_method],
+    [$.enum_definition, $.struct_definition, $.class_definition, $.type_alias_definition, $._modifier],
     [$.paren_type, $._function_type_param],
   ],
 
@@ -43,6 +44,7 @@ module.exports = grammar({
           $.import_statement,
           $.enum_definition,
           $.struct_definition,
+          $.class_definition,
           $.type_alias_definition,
           $.data_set_statement,
           $.variable_declaration,
@@ -137,6 +139,37 @@ module.exports = grammar({
     struct_method: ($) =>
       seq(
         repeat(choice($._visibility_modifier, "static")),
+        "func",
+        field("name", $.identifier),
+        "(",
+        field("parameters", commaSep($.parameter)),
+        ")",
+        optional(seq(":", field("type", $.type))),
+        field("block", $.block),
+      ),
+
+    class_definition: ($) =>
+      seq(
+        optional("export"),
+        optional("extern"),
+        "class",
+        field("name", $.identifier),
+        optional(seq("extends", field("parent", $.identifier))),
+        "{",
+        repeat($._newline),
+        repeat(
+          seq(
+            choice($.struct_field, $.class_method),
+            optional(","),
+            repeat($._newline),
+          ),
+        ),
+        "}",
+      ),
+
+    class_method: ($) =>
+      seq(
+        repeat(choice($._visibility_modifier, "static", "virtual", "override")),
         "func",
         field("name", $.identifier),
         "(",

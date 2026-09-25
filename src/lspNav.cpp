@@ -188,6 +188,19 @@ const StructFieldDecl *findField(const StructDeclStmt &s, const std::string &nam
   }
   return nullptr;
 }
+
+const StructMethodDecl *findMethodInHierarchy(const GlobalIndex &idx, const StructDeclStmt &s, const std::string &name) {
+  if (const StructMethodDecl *m = findMethod(s, name)) return m;
+  if (!s.parentName.has_value()) return nullptr;
+  if (const Tagged<StructDeclStmt> *parent = lookupStruct(idx, *s.parentName)) return findMethodInHierarchy(idx, *parent->decl, name);
+  return nullptr;
+}
+const StructFieldDecl *findFieldInHierarchy(const GlobalIndex &idx, const StructDeclStmt &s, const std::string &name) {
+  if (const StructFieldDecl *f = findField(s, name)) return f;
+  if (!s.parentName.has_value()) return nullptr;
+  if (const Tagged<StructDeclStmt> *parent = lookupStruct(idx, *s.parentName)) return findFieldInHierarchy(idx, *parent->decl, name);
+  return nullptr;
+}
 const EnumVariantDecl *findVariant(const EnumDeclStmt &e, const std::string &name) {
   for (const auto &v : e.variants) {
     if (v.name == name) return &v;
@@ -338,7 +351,7 @@ std::optional<Resolved> resolveCallName(const WalkCtx &ctx, const GlobalIndex &i
     if (const StructMethodDecl *ctor = findMethod(*s->decl, s->decl->name)) {
       return Resolved{.targetLoc = ctor->nameLoc, .file = s->file, .hover = wrap(s->decl->name + "(" + formatParams(ctor->params) + ")")};
     }
-    return Resolved{.targetLoc = s->decl->nameLoc, .file = s->file, .hover = wrap("struct " + s->decl->name)};
+    return Resolved{.targetLoc = s->decl->nameLoc, .file = s->file, .hover = wrap((s->decl->isClass ? "class " : "struct ") + s->decl->name)};
   }
   return std::nullopt;
 }
@@ -402,7 +415,7 @@ std::optional<Resolved> resolveMember(const WalkCtx &ctx, const GlobalIndex &idx
   std::optional<std::string> ty = staticTypeOf(ctx, idx, object);
   if (!ty) return std::nullopt;
   if (const Tagged<StructDeclStmt> *s = lookupStruct(idx, *ty)) {
-    if (const StructFieldDecl *f = findField(*s->decl, prop)) {
+    if (const StructFieldDecl *f = findFieldInHierarchy(idx, *s->decl, prop)) {
       return Resolved{.targetLoc = f->nameLoc, .file = s->file, .hover = wrap("(struct field) " + s->decl->name + "." + f->name + ": " + f->typeText)};
     }
   }
@@ -414,7 +427,7 @@ std::optional<Resolved> resolveMethodCall(const WalkCtx &ctx, const GlobalIndex 
   if (!ty) return std::nullopt;
   const Tagged<StructDeclStmt> *s = lookupStruct(idx, *ty);
   if (!s) return std::nullopt;
-  const StructMethodDecl *m = findMethod(*s->decl, method);
+  const StructMethodDecl *m = findMethodInHierarchy(idx, *s->decl, method);
   if (!m) return std::nullopt;
   std::string kind = m->isStatic ? "static func" : "func";
   std::string ret = m->returnTypeText ? (": " + *m->returnTypeText) : "";
@@ -424,7 +437,7 @@ std::optional<Resolved> resolveMethodCall(const WalkCtx &ctx, const GlobalIndex 
 std::optional<Resolved> resolveTypeRef(const GlobalIndex &idx, const std::string &rawType, SourceLoc loc) {
   std::string base = baseTypeName(rawType);
   if (const Tagged<StructDeclStmt> *s = lookupStruct(idx, base)) {
-    return Resolved{.targetLoc = s->decl->nameLoc, .file = s->file, .hover = wrap("struct " + s->decl->name)};
+    return Resolved{.targetLoc = s->decl->nameLoc, .file = s->file, .hover = wrap((s->decl->isClass ? "class " : "struct ") + s->decl->name)};
   }
   if (const Tagged<EnumDeclStmt> *e = lookupEnum(idx, base)) {
     return Resolved{.targetLoc = e->decl->nameLoc, .file = e->file, .hover = wrap("enum " + e->decl->name)};
@@ -543,7 +556,7 @@ bool walkStmt(const Stmt &stmt, WalkCtx ctx, const GlobalIndex &idx, uint32_t of
         return walkBlock(*n.body, inner, idx, offset, out);
       } else if constexpr (std::is_same_v<T, StructDeclStmt>) {
         if (inSpan(n.nameLoc, offset)) {
-          out = Resolved{.targetLoc = n.nameLoc, .hover = wrap("struct " + n.name)};
+          out = Resolved{.targetLoc = n.nameLoc, .hover = wrap((n.isClass ? "class " : "struct ") + n.name)};
           return true;
         }
         for (const auto &f : n.fields) {
@@ -1008,7 +1021,7 @@ void collectSymbols(const Block &block, std::vector<SymbolEntry> &out) {
   }
 }
 
-const char *DECLARATION_KEYWORDS[] = {"let", "const", "struct", "enum", "type", "data", "func", "import", "export", "extern", "namespace", "@entity"};
+const char *DECLARATION_KEYWORDS[] = {"let", "const", "struct", "class", "enum", "type", "data", "func", "import", "export", "extern", "namespace", "@entity"};
 
 const char *CONTROL_FLOW_KEYWORDS[] = {"if", "while", "do", "for", "return", "as", "at", "align", "anchored", "facing", "positioned", "rotated", "on"};
 
@@ -1309,10 +1322,13 @@ WalkCtx scopeAt(const Block &program, uint32_t offset) {
   return result;
 }
 
-void addFieldsAndMethods(const StructDeclStmt &s, bool showPrivate, bool wantStatic, std::vector<CompletionEntry> &items) {
+void addFieldsAndMethods(
+  const GlobalIndex &idx, const StructDeclStmt &s, bool showPrivate, bool wantStatic, std::vector<CompletionEntry> &items, std::unordered_set<std::string> &seen
+) {
   if (!wantStatic) {
     for (const auto &f : s.fields) {
       if (f.isPrivate && !showPrivate) continue;
+      if (!seen.insert("f:" + f.name).second) continue;
       if (looksLikeFunctionTypeText(f.typeText)) {
         items.push_back(callableEntry(f.name, "field", ": " + f.typeText));
       } else {
@@ -1323,12 +1339,18 @@ void addFieldsAndMethods(const StructDeclStmt &s, bool showPrivate, bool wantSta
   for (const auto &m : s.methods) {
     if (m.isPrivate && !showPrivate) continue;
     if (m.isStatic != wantStatic) continue;
+    if (!seen.insert("m:" + m.name).second) continue;
     std::string ret = m.returnTypeText ? (": " + *m.returnTypeText) : "";
     items.push_back(callableEntry(m.name, "method", "(" + formatParams(m.params) + ")" + ret));
   }
+  if (s.parentName.has_value()) {
+    if (const Tagged<StructDeclStmt> *parent = lookupStruct(idx, *s.parentName)) {
+      addFieldsAndMethods(idx, *parent->decl, /*showPrivate=*/false, wantStatic, items, seen);
+    }
+  }
 }
 
-void addLocalScopeCompletions(const WalkCtx &scope, std::vector<CompletionEntry> &items) {
+void addLocalScopeCompletions(const GlobalIndex &idx, const WalkCtx &scope, std::vector<CompletionEntry> &items) {
   std::unordered_set<std::string> seen;
   for (const auto *p : scope.params) {
     if (!seen.insert(p->name).second) continue;
@@ -1352,7 +1374,10 @@ void addLocalScopeCompletions(const WalkCtx &scope, std::vector<CompletionEntry>
   if (scope.hasImplicitThis && seen.insert("this").second) {
     items.push_back(CompletionEntry{.label = "this", .kind = "variable", .detail = ": &" + scope.structCtx->name});
   }
-  if (scope.structCtx) addFieldsAndMethods(*scope.structCtx, /*showPrivate=*/true, /*includeStatic=*/false, items);
+  if (scope.structCtx) {
+    std::unordered_set<std::string> memberSeen;
+    addFieldsAndMethods(idx, *scope.structCtx, /*showPrivate=*/true, /*includeStatic=*/false, items, memberSeen);
+  }
 }
 
 } // namespace
@@ -1442,7 +1467,8 @@ std::vector<CompletionEntry> completionItems(const Block &program, const std::st
     if (ok) {
       if (const Tagged<StructDeclStmt> *s = lookupStruct(idx, *curType)) {
         bool showPrivate = scope.structCtx && scope.structCtx->name == s->decl->name;
-        addFieldsAndMethods(*s->decl, showPrivate, /*includeStatic=*/false, items);
+        std::unordered_set<std::string> memberSeen;
+        addFieldsAndMethods(idx, *s->decl, showPrivate, /*includeStatic=*/false, items, memberSeen);
       }
     }
     return items;
@@ -1484,7 +1510,8 @@ std::vector<CompletionEntry> completionItems(const Block &program, const std::st
     }
 
     if (const Tagged<StructDeclStmt> *s = lookupStruct(idx, joined)) {
-      addFieldsAndMethods(*s->decl, /*showPrivate=*/false, /*includeStatic=*/true, items);
+      std::unordered_set<std::string> memberSeen;
+      addFieldsAndMethods(idx, *s->decl, /*showPrivate=*/false, /*includeStatic=*/true, items, memberSeen);
       return items;
     }
 
@@ -1524,7 +1551,7 @@ std::vector<CompletionEntry> completionItems(const Block &program, const std::st
     }
   }
 
-  addLocalScopeCompletions(scope, items);
+  addLocalScopeCompletions(idx, scope, items);
 
   for (const auto &[name, overloads] : idx.funcs) {
     if (overloads.empty()) continue;

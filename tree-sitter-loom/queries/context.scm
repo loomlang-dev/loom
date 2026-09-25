@@ -1,5 +1,6 @@
 (function_definition) @context
 (enum_definition) @context
+(class_definition) @context
 
 (while_statement) @context
 (for_statement) @context

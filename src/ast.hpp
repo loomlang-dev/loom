@@ -243,6 +243,8 @@ struct StructMethodDecl {
   SourceLoc nameLoc;
   bool isPrivate = false;
   bool isStatic = false;
+  bool isVirtual = false;
+  bool isOverride = false;
   std::vector<Param> params;
   std::optional<std::string> returnTypeText;
   SourceLoc returnTypeLoc;
@@ -252,8 +254,11 @@ struct StructMethodDecl {
 struct StructDeclStmt {
   bool isExport = false;
   bool isExtern = false;
+  bool isClass = false;
   std::string name;
   SourceLoc nameLoc;
+  std::optional<std::string> parentName;
+  SourceLoc parentLoc;
   std::vector<StructFieldDecl> fields;
   std::vector<StructMethodDecl> methods;
 };

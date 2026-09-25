@@ -740,6 +740,7 @@ void Parser::synchronize() {
     case TokenKind::KwConst:
     case TokenKind::KwFunc:
     case TokenKind::KwStruct:
+    case TokenKind::KwClass:
     case TokenKind::KwEnum:
     case TokenKind::KwType:
     case TokenKind::KwData:
@@ -919,12 +920,22 @@ std::unique_ptr<Stmt> Parser::parseFuncDecl(std::optional<std::string> tag, bool
   );
 }
 
-std::unique_ptr<Stmt> Parser::parseStructDecl(bool isExport, bool isExtern) {
+std::unique_ptr<Stmt> Parser::parseStructDecl(bool isExport, bool isExtern, bool isClass) {
   const Token &startTok = peek();
   advance();
   const Token &nameTok = expect(TokenKind::Identifier, "struct name");
   std::string name(nameTok.text);
   SourceLoc nameLoc = locOf(nameTok);
+
+  std::optional<std::string> parentName;
+  SourceLoc parentLoc;
+  if (isClass && checkIdentifierText("extends")) {
+    advance();
+    const Token &parentTok = expect(TokenKind::Identifier, "parent class name");
+    parentName = std::string(parentTok.text);
+    parentLoc = locOf(parentTok);
+  }
+
   expect(TokenKind::LBrace, "'{' after struct name");
 
   std::vector<StructFieldDecl> fields;
@@ -936,14 +947,19 @@ std::unique_ptr<Stmt> Parser::parseStructDecl(bool isExport, bool isExtern) {
 
   skipNewlines();
   while (!check(TokenKind::RBrace)) {
-    bool isPrivate = false, isPublic = false, isStatic = false;
-    while (checkIdentifierText("public") || checkIdentifierText("private") || checkIdentifierText("static")) {
+    bool isPrivate = false, isPublic = false, isStatic = false, isVirtual = false, isOverride = false;
+    while (checkIdentifierText("public") || checkIdentifierText("private") || checkIdentifierText("static") ||
+           (isClass && (checkIdentifierText("virtual") || checkIdentifierText("override")))) {
       if (checkIdentifierText("public")) isPublic = true;
       else if (checkIdentifierText("private")) isPrivate = true;
-      else isStatic = true;
+      else if (checkIdentifierText("static")) isStatic = true;
+      else if (checkIdentifierText("virtual")) isVirtual = true;
+      else isOverride = true;
       advance();
     }
     if (isPrivate && isPublic) error(peek(), "A struct member cannot be both 'public' and 'private'.");
+    if (isVirtual && isOverride) error(peek(), "A method cannot be both 'virtual' and 'override'.");
+    if ((isVirtual || isOverride) && isStatic) error(peek(), "A static method cannot be 'virtual' or 'override'.");
 
     if (check(TokenKind::KwFunc)) {
       const Token &methodStartTok = peek();
@@ -974,6 +990,8 @@ std::unique_ptr<Stmt> Parser::parseStructDecl(bool isExport, bool isExtern) {
           .nameLoc = mnameLoc,
           .isPrivate = isPrivate,
           .isStatic = isStatic,
+          .isVirtual = isVirtual,
+          .isOverride = isOverride,
           .params = std::move(params),
           .returnTypeText = std::move(returnTypeText),
           .returnTypeLoc = returnTypeLoc,
@@ -995,7 +1013,17 @@ std::unique_ptr<Stmt> Parser::parseStructDecl(bool isExport, bool isExtern) {
   expect(TokenKind::RBrace, "'}' to close struct");
   return makeStmt(
     startTok,
-    StructDeclStmt{.isExport = isExport, .isExtern = isExtern, .name = std::move(name), .nameLoc = nameLoc, .fields = std::move(fields), .methods = std::move(methods)}
+    StructDeclStmt{
+      .isExport = isExport,
+      .isExtern = isExtern,
+      .isClass = isClass,
+      .name = std::move(name),
+      .nameLoc = nameLoc,
+      .parentName = std::move(parentName),
+      .parentLoc = parentLoc,
+      .fields = std::move(fields),
+      .methods = std::move(methods)
+    }
   );
 }
 
@@ -1305,6 +1333,9 @@ std::unique_ptr<Stmt> Parser::parseStatement() {
   } else if (check(TokenKind::KwStruct)) {
     if (tag.has_value()) error(peek(), "'struct' cannot be preceded by a tag");
     stmt = parseStructDecl(isExport, isExtern);
+  } else if (check(TokenKind::KwClass)) {
+    if (tag.has_value()) error(peek(), "'class' cannot be preceded by a tag");
+    stmt = parseStructDecl(isExport, isExtern, /*isClass=*/true);
   } else if (check(TokenKind::KwType)) {
     if (tag.has_value()) error(peek(), "'type' cannot be preceded by a tag");
     stmt = parseTypeAliasDecl(isExport, isExtern);

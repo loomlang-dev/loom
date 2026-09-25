@@ -19,6 +19,8 @@ const char *tokenKindName(TokenKind kind) {
     return "const";
   case TokenKind::KwStruct:
     return "struct";
+  case TokenKind::KwClass:
+    return "class";
   case TokenKind::KwEnum:
     return "enum";
   case TokenKind::KwType:
@@ -137,11 +139,11 @@ const char *tokenKindName(TokenKind kind) {
 
 static const std::unordered_map<std::string_view, TokenKind> &keywordTable() {
   static const std::unordered_map<std::string_view, TokenKind> table = {
-    {"let", TokenKind::KwLet},       {"const", TokenKind::KwConst},         {"struct", TokenKind::KwStruct}, {"enum", TokenKind::KwEnum},   {"func", TokenKind::KwFunc},
-    {"if", TokenKind::KwIf},         {"else", TokenKind::KwElse},           {"while", TokenKind::KwWhile},   {"do", TokenKind::KwDo},       {"for", TokenKind::KwFor},
-    {"in", TokenKind::KwIn},         {"return", TokenKind::KwReturn},       {"import", TokenKind::KwImport}, {"as", TokenKind::KwAs},       {"export", TokenKind::KwExport},
-    {"extern", TokenKind::KwExtern}, {"namespace", TokenKind::KwNamespace}, {"true", TokenKind::KwTrue},     {"false", TokenKind::KwFalse}, {"type", TokenKind::KwType},
-    {"data", TokenKind::KwData},
+    {"let", TokenKind::KwLet},       {"const", TokenKind::KwConst},   {"struct", TokenKind::KwStruct},       {"class", TokenKind::KwClass},   {"enum", TokenKind::KwEnum},
+    {"func", TokenKind::KwFunc},     {"if", TokenKind::KwIf},         {"else", TokenKind::KwElse},           {"while", TokenKind::KwWhile},   {"do", TokenKind::KwDo},
+    {"for", TokenKind::KwFor},       {"in", TokenKind::KwIn},         {"return", TokenKind::KwReturn},       {"import", TokenKind::KwImport}, {"as", TokenKind::KwAs},
+    {"export", TokenKind::KwExport}, {"extern", TokenKind::KwExtern}, {"namespace", TokenKind::KwNamespace}, {"true", TokenKind::KwTrue},     {"false", TokenKind::KwFalse},
+    {"type", TokenKind::KwType},     {"data", TokenKind::KwData},
   };
   return table;
 }

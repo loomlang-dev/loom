@@ -98,6 +98,16 @@ Compiler::ExpressionData Compiler::compileExpression(const Expr &node, unsigned 
   return expr;
 }
 
+const std::vector<Compiler::FunctionData> *Compiler::findMethodOverloads(const StructData *structRef, const std::string &methodName) {
+  for (const StructData *s = structRef; s != nullptr; s = s->parent) {
+    std::string key = s->name + "::" + methodName;
+    std::transform(key.begin(), key.end(), key.begin(), ::tolower);
+    auto it = funcs.find(key);
+    if (it != funcs.end() && !it->second.empty()) return &it->second;
+  }
+  return nullptr;
+}
+
 Compiler::ExpressionData Compiler::compileMethodCallOnVariable(
   const std::string &objVarName, const std::string &methodName, const std::vector<const Expr *> &argNodes, unsigned int id, bool precompute, SourceLoc loc
 ) {
@@ -112,13 +122,11 @@ Compiler::ExpressionData Compiler::compileMethodCallOnVariable(
   }
   const StructData *structRef = objActualType.structRef;
 
-  std::string methodKey = structRef->name + "::" + methodName;
-  std::transform(methodKey.begin(), methodKey.end(), methodKey.begin(), ::tolower);
-  auto methodIt = funcs.find(methodKey);
-  if (methodIt == funcs.end() || methodIt->second.empty()) {
+  const std::vector<FunctionData> *overloads = findMethodOverloads(structRef, methodName);
+  if (!overloads) {
     throw std::runtime_error(formatError(loc, std::format("Struct '{}' has no method named '{}'", structRef->name, methodName)));
   }
-  const FunctionData &rep = methodIt->second.front();
+  const FunctionData &rep = overloads->front();
   if (rep.isStatic) {
     throw std::runtime_error(formatError(loc, std::format("'{}' is a static struct function; call it as {}::{}(...)", methodName, structRef->name, methodName)));
   }
@@ -133,7 +141,73 @@ Compiler::ExpressionData Compiler::compileMethodCallOnVariable(
     implicitSelf = {.data = std::format("\"{}\"", objVar.mangledName), .precomputed = true, .type = Type::RefTypeOf(objVar.type)};
   }
 
-  return compileFunctionInvocation(methodIt->second, methodName, argNodes, implicitSelf, id, precompute, loc);
+  std::string methodNameLower = methodName;
+  std::transform(methodNameLower.begin(), methodNameLower.end(), methodNameLower.begin(), ::tolower);
+  auto vtableIt = structRef->vtableMethods.find(methodNameLower);
+  if (vtableIt != structRef->vtableMethods.end()) {
+    return compileVirtualMethodCall(*structRef, objVar.getStorageName(), methodNameLower, rep, implicitSelf, argNodes, id, loc);
+  }
+
+  return compileFunctionInvocation(*overloads, methodName, argNodes, implicitSelf, id, precompute, loc);
+}
+
+Compiler::ExpressionData Compiler::compileVirtualMethodCall(
+  const StructData &structRef,
+  const std::string &instanceStorageName,
+  const std::string &methodName,
+  const FunctionData &rep,
+  ExpressionData implicitSelf,
+  const std::vector<const Expr *> &argNodes,
+  unsigned int id,
+  SourceLoc loc
+) {
+  Type refType = Type::FunctionTypeOf(rep.params, rep.returnType);
+  std::string vtablePath = std::format("vars.{}.__vtbl_{}", instanceStorageName, methodName);
+
+  return compileIndirectCallCore(
+    [this, vtablePath]() -> ExpressionData {
+      return {
+        .data = std::format("data modify storage {0}:global expr_str1 set from storage {0}:global {1}", datapackNamespace, vtablePath),
+        .precomputed = false,
+        .type = Type::StringType()
+      };
+    },
+    refType,
+    argNodes,
+    implicitSelf,
+    id,
+    loc,
+    methodName
+  );
+}
+
+Compiler::ExpressionData Compiler::compileSuperCall(const std::vector<const Expr *> &argNodes, unsigned int id, SourceLoc loc) {
+  if (!currentStructContext || !currentStructContext->parent) {
+    throw std::runtime_error(formatError(loc, "'super(...)' can only be used inside a class constructor with a parent class."));
+  }
+  auto thisIt = vars.find("this");
+  if (thisIt == vars.end() || !thisIt->second.type.isStruct()) {
+    throw std::runtime_error(formatError(loc, "'super(...)' can only be used inside a constructor."));
+  }
+
+  const StructData *parent = currentStructContext->parent;
+  std::string parentKey = parent->name;
+  std::transform(parentKey.begin(), parentKey.end(), parentKey.begin(), ::tolower);
+  auto ctorIt = funcs.find(parentKey);
+  if (ctorIt == funcs.end() || ctorIt->second.empty()) {
+    throw std::runtime_error(formatError(loc, "Parent class '" + parent->name + "' has no constructor to call with 'super(...)'."));
+  }
+  const std::vector<FunctionData> *parentCtors = &ctorIt->second;
+
+  ExpressionData parentInstance = compileFunctionInvocation(*parentCtors, parent->name, argNodes, std::nullopt, id, false, loc);
+
+  const std::string &thisMangled = thisIt->second.mangledName;
+  std::string ret = parentInstance.data + "\n";
+  for (const auto &f : parent->fields) {
+    ret += std::format("data modify storage {0}:global vars.{1}.{2} set from storage {0}:global expr_str{3}.{2}\n", datapackNamespace, thisMangled, f.name, id);
+  }
+
+  return {.data = ret, .precomputed = false, .type = Type::IntegerType()};
 }
 
 Compiler::ExpressionData Compiler::compileFunctionInvocation(
@@ -344,13 +418,38 @@ Compiler::ExpressionData Compiler::compileFunctionInvocation(
 
 Compiler::ExpressionData
 Compiler::compileIndirectCall(const std::string &refName, const Type &refType, const std::vector<const Expr *> &argNodes, unsigned int id, SourceLoc loc) {
+  return compileIndirectCallCore(
+    [this, refName, loc]() {
+      Expr refNode;
+      refNode.loc = loc;
+      refNode.data = VarRefExpr{.name = refName};
+      return compileExpression(refNode, 1, true);
+    },
+    refType,
+    argNodes,
+    std::nullopt,
+    id,
+    loc,
+    refName
+  );
+}
+
+Compiler::ExpressionData Compiler::compileIndirectCallCore(
+  std::function<ExpressionData()> produceRef,
+  const Type &refType,
+  const std::vector<const Expr *> &argNodes,
+  std::optional<ExpressionData> implicitSelf,
+  unsigned int id,
+  SourceLoc loc,
+  const std::string &displayName
+) {
   const std::vector<Type> &paramTypes = refType.funcParams;
   if (argNodes.size() != paramTypes.size()) {
-    throw std::runtime_error(formatError(loc, std::format("Function reference '{}' expects {} argument(s), got {}.", refName, paramTypes.size(), argNodes.size())));
+    throw std::runtime_error(formatError(loc, std::format("Function reference '{}' expects {} argument(s), got {}.", displayName, paramTypes.size(), argNodes.size())));
   }
   for (const auto &pt : paramTypes) {
     if (pt.isRef()) {
-      throw std::runtime_error(formatError(loc, std::format("Calling through function reference '{}' with reference parameters is not yet supported.", refName)));
+      throw std::runtime_error(formatError(loc, std::format("Calling through function reference '{}' with reference parameters is not yet supported.", displayName)));
     }
   }
 
@@ -358,6 +457,9 @@ Compiler::compileIndirectCall(const std::string &refName, const Type &refType, c
   for (const auto &argNode : argNodes) compiledArgs.push_back(compileExpression(*argNode));
 
   std::string argPushData;
+  if (implicitSelf.has_value()) {
+    argPushData += std::format("data modify storage {}:stack regs append value {}\n", callStackNamespace, implicitSelf->data);
+  }
   for (size_t i = 0; i < compiledArgs.size(); i++) {
     ExpressionData argExpr = compiledArgs[i];
     const Type &expectedType = paramTypes[i];
@@ -370,7 +472,7 @@ Compiler::compileIndirectCall(const std::string &refName, const Type &refType, c
       if (casted.has_value()) {
         argExpr = casted.value();
       } else {
-        throw std::runtime_error(formatError(argNodes[i]->loc, std::format("Failed to promote argument {} for function reference '{}'", i + 1, refName)));
+        throw std::runtime_error(formatError(argNodes[i]->loc, std::format("Failed to promote argument {} for function reference '{}'", i + 1, displayName)));
       }
     }
 
@@ -416,10 +518,7 @@ Compiler::compileIndirectCall(const std::string &refName, const Type &refType, c
           pop;
   }
 
-  Expr refNode;
-  refNode.loc = loc;
-  refNode.data = VarRefExpr{.name = refName};
-  ExpressionData refExpr = compileExpression(refNode, 1, true);
+  ExpressionData refExpr = produceRef();
 
   std::string targetSetup;
   if (refExpr.precomputed) {
@@ -1203,19 +1302,32 @@ Compiler::ExpressionData Compiler::compileExpressionImpl(const Expr &node, unsig
         std::vector<const Expr *> argNodes;
         for (const auto &a : n.arguments) argNodes.push_back(a.get());
 
+        if (targetFunc == "super") return compileSuperCall(argNodes, id, node.loc);
+
         if (const auto &it = builtins.find(targetFunc); it != builtins.end()) {
           if (auto optResult = it->second(*this, argNodes, id, precompute, node.loc)) return optResult.value();
         }
 
         if (currentStructContext && targetFunc.find("::") == std::string::npos) {
-          std::string implicitKey = currentStructContext->name + "::" + targetFunc;
-          std::transform(implicitKey.begin(), implicitKey.end(), implicitKey.begin(), ::tolower);
-          auto implicitIt = funcs.find(implicitKey);
-          if (implicitIt != funcs.end() && !implicitIt->second.empty() && !implicitIt->second.front().isStatic) {
+          const std::vector<FunctionData> *implicitOverloads = findMethodOverloads(currentStructContext, targetFunc);
+          if (implicitOverloads && !implicitOverloads->front().isStatic) {
             auto thisIt = vars.find("this");
             if (thisIt != vars.end()) {
               ExpressionData implicitSelf = {.data = std::format("\"{}\"", thisIt->second.mangledName), .precomputed = true, .type = thisIt->second.type};
-              return compileFunctionInvocation(implicitIt->second, targetFunc, argNodes, implicitSelf, id, precompute, node.loc);
+              auto vtableIt = currentStructContext->vtableMethods.find(targetFunc);
+              if (vtableIt != currentStructContext->vtableMethods.end()) {
+                return compileVirtualMethodCall(
+                  *currentStructContext,
+                  thisIt->second.getStorageName(),
+                  targetFunc,
+                  implicitOverloads->front(),
+                  implicitSelf,
+                  argNodes,
+                  id,
+                  node.loc
+                );
+              }
+              return compileFunctionInvocation(*implicitOverloads, targetFunc, argNodes, implicitSelf, id, precompute, node.loc);
             }
           }
         }

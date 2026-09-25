@@ -388,6 +388,10 @@
           "named": true
         },
         {
+          "type": "class_definition",
+          "named": true
+        },
+        {
           "type": "command_statement",
           "named": true
         },
@@ -570,6 +574,96 @@
       "type": {
         "multiple": false,
         "required": true,
+        "types": [
+          {
+            "type": "type",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "class_definition",
+    "named": true,
+    "fields": {
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "parent": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "class_method",
+          "named": true
+        },
+        {
+          "type": "struct_field",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "class_method",
+    "named": true,
+    "fields": {
+      "block": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "block",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "parameters": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": ",",
+            "named": false
+          },
+          {
+            "type": "parameter",
+            "named": true
+          }
+        ]
+      },
+      "type": {
+        "multiple": false,
+        "required": false,
         "types": [
           {
             "type": "type",
@@ -2630,6 +2724,10 @@
           "named": true
         },
         {
+          "type": "class_definition",
+          "named": true
+        },
+        {
           "type": "command_statement",
           "named": true
         },
@@ -3325,6 +3423,10 @@
       "types": [
         {
           "type": "assignment",
+          "named": true
+        },
+        {
+          "type": "class_definition",
           "named": true
         },
         {
@@ -4543,6 +4645,10 @@
     "named": false
   },
   {
+    "type": "class",
+    "named": false
+  },
+  {
     "type": "command_arg",
     "named": true
   },
@@ -4585,6 +4691,10 @@
   },
   {
     "type": "export",
+    "named": false
+  },
+  {
+    "type": "extends",
     "named": false
   },
   {
@@ -4684,6 +4794,10 @@
     "named": false
   },
   {
+    "type": "override",
+    "named": false
+  },
+  {
     "type": "owner",
     "named": false
   },
@@ -4749,6 +4863,10 @@
   },
   {
     "type": "vehicle",
+    "named": false
+  },
+  {
+    "type": "virtual",
     "named": false
   },
   {

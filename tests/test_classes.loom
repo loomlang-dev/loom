@@ -1,0 +1,48 @@
+class Animal {
+  name: string
+
+  func Animal(n: string) {
+    this.name = n
+  }
+
+  virtual func speak(): string {
+    return "..."
+  }
+
+  func describe(): string {
+    return this.name
+  }
+}
+
+class Dog extends Animal {
+  func Dog(n: string) {
+    super(n)
+  }
+
+  override func speak(): string {
+    return "Woof"
+  }
+}
+
+class Cat extends Animal {
+  func Cat(n: string) {
+    super(n)
+  }
+
+  override func speak(): string {
+    return "Meow"
+  }
+}
+
+func main() {
+  let a: Animal = Dog("Rex");
+  let b: Animal = Cat("Tom");
+  let c: Animal = Animal("Generic");
+
+  let s1: string = a.speak();
+  let s2: string = b.speak();
+  let s3: string = c.speak();
+  let name: string = a.describe();
+
+  say ${s1} ${s2} ${s3} ${name};
+}

@@ -14,6 +14,7 @@ enum class TokenKind {
   KwLet,
   KwConst,
   KwStruct,
+  KwClass,
   KwEnum,
   KwType,
   KwData,

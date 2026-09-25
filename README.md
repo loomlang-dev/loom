@@ -26,7 +26,7 @@ A programming language that compiles to Minecraft datapacks.
       `(int, int) -> int`)
 - [x] Custom type definitions
 - [x] Data access
-- [ ] Classes
+- [x] Classes
 - [ ] Operater overloading
 - [ ] Generics
 - [x] Lambda functions

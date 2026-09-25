@@ -7,6 +7,9 @@
 (type_alias_definition
   name: (identifier) @local.definition.type)
 
+(class_definition
+  name: (identifier) @local.definition.type)
+
 (enum_variant
   name: (identifier) @local.definition.constant)
 

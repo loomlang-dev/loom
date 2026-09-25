@@ -4,7 +4,10 @@
 ["export" "extern"] @keyword.storage
 "@entity" @attribute
 ["public" "private" "static"] @keyword.storage
-["let" "const" "enum" "struct" "type" "data" "namespace"] @keyword.storage
+["let" "const" "enum" "struct" "class" "type" "data" "namespace"] @keyword.storage
+["virtual" "override"] @keyword.storage
+(class_definition "extends" @keyword.storage)
+(function_call name: (namespaced_identifier) @keyword.function (#eq? @keyword.function "super"))
 (data_get_expression ["storage" "entity" "block"] @keyword.conditional)
 (data_set_statement ["storage" "entity" "block"] @keyword.conditional)
 (data_get_expression target: (resource_location) @string)
@@ -40,6 +43,9 @@
 (struct_definition name: (identifier) @type)
 (struct_field name: (identifier) @property)
 (struct_method name: (identifier) @method)
+(class_definition name: (identifier) @type)
+(class_definition parent: (identifier) @type)
+(class_method name: (identifier) @method)
 (enum_definition name: (identifier) @type)
 (type_alias_definition name: (identifier) @type)
 (enum_variant name: (identifier) @constant)

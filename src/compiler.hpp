@@ -200,12 +200,17 @@ public:
     StructField &operator=(StructField &&) noexcept = default;
   };
 
+  struct FunctionData;
+
   struct StructData {
     std::string name;
     std::vector<StructField> fields;
     bool exported = false;
     bool isExtern = false;
     bool hasConstructor = false;
+
+    const StructData *parent = nullptr;
+    std::unordered_map<std::string, const FunctionData *> vtableMethods;
 
     uint64_t uid = 0;
   };
@@ -233,6 +238,7 @@ public:
     bool isStatic = false;
     bool isConstructor = false;
     bool isPrivate = false;
+    bool isVirtual = false;
   };
 
   struct VariableData {
@@ -356,6 +362,8 @@ private:
     const std::string &objVarName, const std::string &methodName, const std::vector<const Expr *> &argNodes, unsigned int id, bool precompute, SourceLoc loc
   );
 
+  const std::vector<FunctionData> *findMethodOverloads(const StructData *structRef, const std::string &methodName);
+
   ExpressionData compileFunctionInvocation(
     const std::vector<FunctionData> &overloads,
     const std::string &displayName,
@@ -367,6 +375,28 @@ private:
   );
 
   ExpressionData compileIndirectCall(const std::string &refName, const Type &refType, const std::vector<const Expr *> &argNodes, unsigned int id, SourceLoc loc);
+  ExpressionData compileIndirectCallCore(
+    std::function<ExpressionData()> produceRef,
+    const Type &refType,
+    const std::vector<const Expr *> &argNodes,
+    std::optional<ExpressionData> implicitSelf,
+    unsigned int id,
+    SourceLoc loc,
+    const std::string &displayName
+  );
+
+  ExpressionData compileVirtualMethodCall(
+    const StructData &structRef,
+    const std::string &instanceStorageName,
+    const std::string &methodName,
+    const FunctionData &rep,
+    ExpressionData implicitSelf,
+    const std::vector<const Expr *> &argNodes,
+    unsigned int id,
+    SourceLoc loc
+  );
+
+  ExpressionData compileSuperCall(const std::vector<const Expr *> &argNodes, unsigned int id, SourceLoc loc);
 
   ExpressionData compileLambdaExpr(const LambdaExpr &n, std::optional<Type> expectedType, unsigned int id, SourceLoc loc);
 

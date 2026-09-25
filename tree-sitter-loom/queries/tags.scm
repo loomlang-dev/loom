@@ -6,3 +6,6 @@
 
 (type_alias_definition
   name: (identifier) @tag.definition.type)
+
+(class_definition
+  name: (identifier) @tag.definition.class)
