@@ -101,6 +101,25 @@ for f in "$TEST_DIR"/*.loom; do
     fi
   fi
 
+  if [ "$name" = "test_generics" ]; then
+    if ! grep -rq "identity<int>" "$od/data"; then
+      echo "FAIL: $name did not emit a monomorphized identity<int> instantiation"
+      failures=$((failures+1))
+      continue
+    fi
+    if ! grep -rq "identity<string>" "$od/data"; then
+      echo "FAIL: $name did not emit a separate monomorphized identity<string> instantiation"
+      failures=$((failures+1))
+      continue
+    fi
+    box_ctor_count=$(find "$od/data" -name "Box_*.mcfunction" | wc -l)
+    if [ "$box_ctor_count" -lt 2 ]; then
+      echo "FAIL: $name did not emit distinct Box<int>/Box<string> constructor instantiations (found $box_ctor_count)"
+      failures=$((failures+1))
+      continue
+    fi
+  fi
+
   if [ "$name" = "test_data_access" ]; then
     if ! grep -rq "set from entity @s Health" "$od/data"; then
       echo "FAIL: $name did not emit a direct entity NBT read"

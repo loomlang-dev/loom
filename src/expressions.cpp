@@ -108,6 +108,45 @@ const std::vector<Compiler::FunctionData> *Compiler::findMethodOverloads(const S
   return nullptr;
 }
 
+std::vector<Compiler::Type> Compiler::resolveGenericTypeArgs(
+  const std::vector<std::string> &typeParamNames,
+  const std::vector<std::string> &explicitTypeArgTexts,
+  const std::vector<Param> &declParams,
+  const std::vector<const Expr *> &argNodes,
+  const std::string &displayName,
+  SourceLoc loc
+) {
+  if (!explicitTypeArgTexts.empty()) {
+    if (explicitTypeArgTexts.size() != typeParamNames.size()) {
+      throw std::runtime_error(
+        formatError(loc, std::format("'{}' expects {} explicit type argument(s), got {}.", displayName, typeParamNames.size(), explicitTypeArgTexts.size()))
+      );
+    }
+    std::vector<Type> typeArgs;
+    typeArgs.reserve(explicitTypeArgTexts.size());
+    for (const auto &text : explicitTypeArgTexts) typeArgs.push_back(parseTypeFromString(text));
+    return typeArgs;
+  }
+
+  std::vector<Type> typeArgs;
+  for (const auto &paramName : typeParamNames) {
+    std::optional<Type> resolved;
+    for (size_t i = 0; i < declParams.size() && i < argNodes.size(); i++) {
+      if (declParams[i].typeText == paramName) {
+        resolved = compileExpression(*argNodes[i]).type;
+        break;
+      }
+    }
+    if (!resolved.has_value()) {
+      throw std::runtime_error(formatError(
+        loc, std::format("Cannot infer type argument '{}' for '{}'; provide it explicitly with '{}::<...>(...)'.", paramName, displayName, displayName)
+      ));
+    }
+    typeArgs.push_back(std::move(resolved.value()));
+  }
+  return typeArgs;
+}
+
 Compiler::ExpressionData Compiler::compileMethodCallOnVariable(
   const std::string &objVarName, const std::string &methodName, const std::vector<const Expr *> &argNodes, unsigned int id, bool precompute, SourceLoc loc
 ) {
@@ -208,6 +247,109 @@ Compiler::ExpressionData Compiler::compileSuperCall(const std::vector<const Expr
   }
 
   return {.data = ret, .precomputed = false, .type = Type::IntegerType()};
+}
+
+Compiler::ExpressionData Compiler::compileStructExpr(const StructExpr &n, std::optional<Type> expectedType, unsigned int id, bool precompute, SourceLoc loc) {
+  auto it = findInMap(structs, n.name);
+  const StructData *resolvedStructData = it != structs.end() ? &it->second : nullptr;
+
+  if (!resolvedStructData) {
+    if (auto genIt = findInMap(genericStructTemplates, n.name); genIt != genericStructTemplates.end()) {
+      if (!n.explicitTypeArgs.empty()) {
+        std::vector<Type> typeArgs;
+        typeArgs.reserve(n.explicitTypeArgs.size());
+        for (const auto &argText : n.explicitTypeArgs) typeArgs.push_back(parseTypeFromString(argText));
+        resolvedStructData = instantiateGenericStruct(genIt->second, typeArgs, loc);
+      } else if (expectedType.has_value() && expectedType->isStruct() && expectedType->structRef &&
+                 expectedType->structRef->name.starts_with(genIt->second.fullName + "<")) {
+        resolvedStructData = expectedType->structRef;
+      } else {
+        throw std::runtime_error(formatError(
+          loc,
+          std::format(
+            "Cannot infer type arguments for generic struct '{}'; provide them explicitly with '{}::<...> {{ ... }}', or use it where the target type is "
+            "already known (e.g. a 'let' with an explicit type).",
+            genIt->second.fullName,
+            genIt->second.fullName
+          )
+        ));
+      }
+    }
+  }
+
+  if (!resolvedStructData) {
+    throw std::runtime_error(formatError(loc, "Unknown struct type: " + n.name));
+  }
+  const StructData &structData = *resolvedStructData;
+  if (structData.hasConstructor) {
+    throw std::runtime_error(formatError(loc, std::format("Struct '{}' has a constructor; use {}(...) instead of struct-literal syntax.", n.name, structData.name)));
+  }
+  Type targetType = Type::StructTypeOf(&structData);
+
+  bool allPrecomputed = true;
+  std::vector<std::pair<std::string, ExpressionData>> compiledFields;
+
+  for (const auto &field : n.fields) {
+    ExpressionData elemData = compileExpression(*field.value, id + 1, true);
+
+    bool found = false;
+    for (const auto &sf : structData.fields) {
+      if (sf.name == field.name) {
+        found = true;
+        if (*sf.type != elemData.type) {
+          throw std::runtime_error(formatError(loc, "Type mismatch for field '" + field.name + "'"));
+        }
+        break;
+      }
+    }
+    if (!found) {
+      throw std::runtime_error(formatError(loc, "Unknown field '" + field.name + "' in struct " + n.name));
+    }
+
+    if (!elemData.precomputed) allPrecomputed = false;
+    compiledFields.push_back({field.name, elemData});
+  }
+
+  if (allPrecomputed) {
+    std::string jsonObj = "{";
+    for (size_t i = 0; i < compiledFields.size(); ++i) {
+      jsonObj += compiledFields[i].first + ":" + compiledFields[i].second.data;
+      if (i + 1 < compiledFields.size()) jsonObj += ",";
+    }
+    jsonObj += "}";
+
+    if (precompute) {
+      return {.data = jsonObj, .precomputed = true, .type = targetType};
+    }
+    return {.data = std::format("data modify storage {}:global expr_str{} set value {}", datapackNamespace, id, jsonObj), .precomputed = false, .type = targetType};
+  }
+
+  std::string runtimeCmds = std::format("data modify storage {}:global expr_str{} set value {{}}\n", datapackNamespace, id);
+
+  for (const auto &pair : compiledFields) {
+    const auto &fieldName = pair.first;
+    const auto &elemData = pair.second;
+    if (elemData.precomputed) {
+      runtimeCmds += std::format("data modify storage {}:global expr_str{}.{} set value {}\n", datapackNamespace, id, fieldName, elemData.data);
+    } else {
+      runtimeCmds += elemData.data + "\n";
+      if (elemData.type.isString() || elemData.type.isList() || elemData.type.isMap() || elemData.type.isStruct()) {
+        runtimeCmds += std::format(
+          "data modify storage {}:global expr_str{}.{} set from storage {}:global expr_str{}\n", datapackNamespace, id, fieldName, datapackNamespace, id + 1
+        );
+      } else if (elemData.type.isFloat()) {
+        runtimeCmds += std::format(
+          "data modify storage {}:global expr_str{}.{} set from storage {}:global expr_float{}\n", datapackNamespace, id, fieldName, datapackNamespace, id + 1
+        );
+      } else {
+        runtimeCmds += std::format(
+          "execute store result storage {}:global expr_str{}.{} int 1 run scoreboard players get expr_output{} temp\n", datapackNamespace, id, fieldName, id + 1
+        );
+      }
+    }
+  }
+
+  return {.data = runtimeCmds, .precomputed = false, .type = targetType};
 }
 
 Compiler::ExpressionData Compiler::compileOperatorCall(
@@ -1132,96 +1274,7 @@ Compiler::ExpressionData Compiler::compileExpressionImpl(const Expr &node, unsig
       }
 
       else if constexpr (std::is_same_v<T, StructExpr>) {
-        auto it = findInMap(structs, n.name);
-        if (it == structs.end()) {
-          throw std::runtime_error(formatError(node.loc, "Unknown struct type: " + n.name));
-        }
-        const StructData &structData = it->second;
-        if (structData.hasConstructor) {
-          throw std::runtime_error(
-            formatError(node.loc, std::format("Struct '{}' has a constructor; use {}(...) instead of struct-literal syntax.", n.name, structData.name))
-          );
-        }
-        Type targetType = Type::StructTypeOf(&structData);
-
-        bool allPrecomputed = true;
-        std::vector<std::pair<std::string, ExpressionData>> compiledFields;
-
-        for (const auto &field : n.fields) {
-          ExpressionData elemData = compileExpression(*field.value, id + 1, true);
-
-          bool found = false;
-          for (const auto &sf : structData.fields) {
-            if (sf.name == field.name) {
-              found = true;
-              if (*sf.type != elemData.type) {
-                throw std::runtime_error(formatError(node.loc, "Type mismatch for field '" + field.name + "'"));
-              }
-              break;
-            }
-          }
-          if (!found) {
-            throw std::runtime_error(formatError(node.loc, "Unknown field '" + field.name + "' in struct " + n.name));
-          }
-
-          if (!elemData.precomputed) allPrecomputed = false;
-          compiledFields.push_back({field.name, elemData});
-        }
-
-        if (allPrecomputed) {
-          std::string jsonObj = "{";
-          for (size_t i = 0; i < compiledFields.size(); ++i) {
-            jsonObj += compiledFields[i].first + ":" + compiledFields[i].second.data;
-            if (i + 1 < compiledFields.size()) jsonObj += ",";
-          }
-          jsonObj += "}";
-
-          if (precompute) {
-            return {.data = jsonObj, .precomputed = true, .type = targetType};
-          }
-          return {.data = std::format("data modify storage {}:global expr_str{} set value {}", datapackNamespace, id, jsonObj), .precomputed = false, .type = targetType};
-        }
-
-        std::string runtimeCmds = std::format("data modify storage {}:global expr_str{} set value {{}}\n", datapackNamespace, id);
-
-        for (const auto &pair : compiledFields) {
-          const auto &fieldName = pair.first;
-          const auto &elemData = pair.second;
-          if (elemData.precomputed) {
-            runtimeCmds += std::format("data modify storage {}:global expr_str{}.{} set value {}\n", datapackNamespace, id, fieldName, elemData.data);
-          } else {
-            runtimeCmds += elemData.data + "\n";
-            if (elemData.type.isString() || elemData.type.isList() || elemData.type.isMap() || elemData.type.isStruct()) {
-              runtimeCmds += std::format(
-                "data modify storage {}:global expr_str{}.{} set from storage {}:global expr_str{}\n",
-                datapackNamespace,
-                id,
-                fieldName,
-                datapackNamespace,
-                id + 1
-              );
-            } else if (elemData.type.isFloat()) {
-              runtimeCmds += std::format(
-                "data modify storage {}:global expr_str{}.{} set from storage {}:global expr_float{}\n",
-                datapackNamespace,
-                id,
-                fieldName,
-                datapackNamespace,
-                id + 1
-              );
-            } else {
-              runtimeCmds += std::format(
-                "execute store result storage {}:global expr_str{}.{} int 1 run scoreboard players get expr_output{} temp\n",
-                datapackNamespace,
-                id,
-                fieldName,
-                id + 1
-              );
-            }
-          }
-        }
-
-        return {.data = runtimeCmds, .precomputed = false, .type = targetType};
+        return compileStructExpr(n, std::nullopt, id, precompute, node.loc);
       }
 
       else if constexpr (std::is_same_v<T, TernaryExpr>) {
@@ -1420,6 +1473,48 @@ Compiler::ExpressionData Compiler::compileExpressionImpl(const Expr &node, unsig
           if (refVarIt != vars.end() && refVarIt->second.type.isFunction()) {
             return compileIndirectCall(n.name, refVarIt->second.type, argNodes, id, node.loc);
           }
+
+          if (auto genFuncIt = findInMap(genericFuncTemplates, targetFunc, true); genFuncIt != genericFuncTemplates.end()) {
+            const GenericFuncTemplate *matched = nullptr;
+            for (const auto &tmpl : genFuncIt->second) {
+              if (tmpl.decl->params.size() == argNodes.size()) {
+                matched = &tmpl;
+                break;
+              }
+            }
+            if (!matched) {
+              throw std::runtime_error(formatError(node.loc, std::format("No matching generic function '{}' takes {} argument(s).", n.name, argNodes.size())));
+            }
+            std::vector<Type> typeArgs =
+              resolveGenericTypeArgs(matched->decl->typeParams, n.explicitTypeArgs, matched->decl->params, argNodes, matched->fullName, node.loc);
+            const FunctionData *funcData = instantiateGenericFunc(*matched, typeArgs, node.loc);
+            std::vector<FunctionData> overloads = {*funcData};
+            return compileFunctionInvocation(overloads, funcData->name, argNodes, std::nullopt, id, precompute, node.loc);
+          }
+
+          if (auto genStructIt = findInMap(genericStructTemplates, n.name); genStructIt != genericStructTemplates.end()) {
+            const GenericStructTemplate &tmpl = genStructIt->second;
+            const StructMethodDecl *ctorDecl = nullptr;
+            for (const auto &m : tmpl.decl->methods) {
+              if (m.name == tmpl.decl->name) {
+                ctorDecl = &m;
+                break;
+              }
+            }
+            if (!ctorDecl) {
+              throw std::runtime_error(formatError(node.loc, std::format("Generic struct '{}' has no constructor to call.", tmpl.fullName)));
+            }
+            std::vector<Type> typeArgs = resolveGenericTypeArgs(tmpl.decl->typeParams, n.explicitTypeArgs, ctorDecl->params, argNodes, tmpl.fullName, node.loc);
+            StructData *structPtr = instantiateGenericStruct(tmpl, typeArgs, node.loc);
+            std::string ctorKey = structPtr->name;
+            std::transform(ctorKey.begin(), ctorKey.end(), ctorKey.begin(), ::tolower);
+            auto ctorIt = funcs.find(ctorKey);
+            if (ctorIt == funcs.end() || ctorIt->second.empty()) {
+              throw std::runtime_error(formatError(node.loc, std::format("Generic struct '{}' has no constructor to call.", structPtr->name)));
+            }
+            return compileFunctionInvocation(ctorIt->second, structPtr->name, argNodes, std::nullopt, id, precompute, node.loc);
+          }
+
           throw std::runtime_error(formatError(node.loc, "Unknown function: " + targetFunc));
         }
 

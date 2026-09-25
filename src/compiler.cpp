@@ -28,6 +28,23 @@ uint64_t nextTypeUid() {
   static uint64_t counter = 0;
   return ++counter;
 }
+
+std::vector<std::string> splitTopLevelCommaArgs(const std::string &inner) {
+  std::vector<std::string> parts;
+  int depth = 0;
+  size_t start = 0;
+  for (size_t i = 0; i <= inner.size(); i++) {
+    bool atEnd = i == inner.size();
+    char c = atEnd ? '\0' : inner[i];
+    if (!atEnd && (c == '<' || c == '(' || c == '[')) depth++;
+    else if (!atEnd && (c == '>' || c == ')' || c == ']')) depth--;
+    if (atEnd || (c == ',' && depth == 0)) {
+      parts.push_back(inner.substr(start, i - start));
+      start = i + 1;
+    }
+  }
+  return parts;
+}
 } // namespace
 
 Compiler::Compiler(
@@ -71,7 +88,7 @@ std::optional<Compiler::VariableData> Compiler::lookupVariable(const std::string
   return std::nullopt;
 }
 
-Compiler::Type Compiler::parseTypeFromString(const std::string &typeText) const {
+Compiler::Type Compiler::parseTypeFromString(const std::string &typeText) {
   auto trim = [](std::string s) {
     while (!s.empty() && isspace((unsigned char)s.front())) s.erase(s.begin());
     while (!s.empty() && isspace((unsigned char)s.back())) s.pop_back();
@@ -179,6 +196,8 @@ Compiler::Type Compiler::parseTypeFromString(const std::string &typeText) const 
     throw std::runtime_error(std::format("Invalid type: {}", t));
   }
 
+  if (auto boundIt = currentTypeParamBindings.find(t); boundIt != currentTypeParamBindings.end()) return boundIt->second;
+
   if (t == "int") return Type::IntegerType();
   if (t == "bool") return Type::BooleanType();
   if (t == "string") return Type::StringType();
@@ -187,9 +206,154 @@ Compiler::Type Compiler::parseTypeFromString(const std::string &typeText) const 
   if (it != enums.end()) return Type::EnumTypeOf(&it->second);
   const auto itStruct = findInMap(structs, t);
   if (itStruct != structs.end()) return Type::StructTypeOf(&itStruct->second);
+
+  if (size_t ltPos = t.find('<'); ltPos != std::string::npos && t.back() == '>') {
+    std::string baseIdent = t.substr(0, ltPos);
+    const auto tmplIt = findInMap(genericStructTemplates, baseIdent);
+    if (tmplIt != genericStructTemplates.end()) {
+      std::string inner = t.substr(ltPos + 1, t.size() - ltPos - 2);
+      std::vector<std::string> argTexts = splitTopLevelCommaArgs(inner);
+      std::vector<Type> typeArgs;
+      typeArgs.reserve(argTexts.size());
+      for (const auto &argText : argTexts) typeArgs.push_back(parseTypeFromString(trim(argText)));
+      return Type::StructTypeOf(instantiateGenericStruct(tmplIt->second, typeArgs, SourceLoc{}));
+    }
+    throw std::runtime_error(std::format("Unknown generic type: {}", baseIdent));
+  }
+
   const auto itAlias = findInMap(typeAliases, t);
   if (itAlias != typeAliases.end()) return itAlias->second.type;
   throw std::runtime_error(std::format("Unknown type: {}", t));
+}
+
+std::string Compiler::typeDisplayName(const Type &type) const {
+  switch (type.kind) {
+  case Type::Integer:
+    return "int";
+  case Type::Boolean:
+    return "bool";
+  case Type::String:
+    return "string";
+  case Type::Float:
+    return "float";
+  case Type::Enum:
+    return type.enumRef ? type.enumRef->name : "enum";
+  case Type::Struct:
+    return type.structRef ? type.structRef->name : "struct";
+  case Type::List:
+    return typeDisplayName(*type.baseType) + "[]";
+  case Type::Reference:
+    return "&" + typeDisplayName(*type.baseType);
+  case Type::Map:
+    return "map<" + typeDisplayName(*type.baseType) + "," + typeDisplayName(*type.mapValueType) + ">";
+  case Type::Function: {
+    std::string s = "(";
+    for (size_t i = 0; i < type.funcParams.size(); i++) {
+      if (i != 0) s += ",";
+      s += typeDisplayName(type.funcParams[i]);
+    }
+    s += ") ->";
+    if (type.baseType) s += " " + typeDisplayName(*type.baseType);
+    return s;
+  }
+  }
+  return "?";
+}
+
+Compiler::StructData *Compiler::instantiateGenericStruct(const GenericStructTemplate &tmpl, const std::vector<Type> &typeArgs, SourceLoc loc) {
+  const StructDeclStmt &decl = *tmpl.decl;
+  if (typeArgs.size() != decl.typeParams.size()) {
+    throw std::runtime_error(formatError(loc, std::format("'{}' expects {} type argument(s), got {}.", tmpl.fullName, decl.typeParams.size(), typeArgs.size())));
+  }
+
+  std::string displayName = tmpl.fullName + "<";
+  for (size_t i = 0; i < typeArgs.size(); i++) {
+    if (i != 0) displayName += ",";
+    displayName += typeDisplayName(typeArgs[i]);
+  }
+  displayName += ">";
+
+  if (auto it = structs.find(displayName); it != structs.end()) return &it->second;
+
+  std::unordered_map<std::string, Type> bindings;
+  for (size_t i = 0; i < decl.typeParams.size(); i++) bindings[decl.typeParams[i]] = typeArgs[i];
+
+  std::unordered_map<std::string, Type> savedBindings = std::move(currentTypeParamBindings);
+  currentTypeParamBindings = bindings;
+
+  StructData structData = {.name = displayName, .exported = decl.isExport, .isExtern = decl.isExtern, .uid = nextTypeUid()};
+  StructData *structPtr = &(structs[displayName] = std::move(structData));
+
+  try {
+    for (const auto &f : decl.fields) {
+      Type fieldType = parseTypeFromString(f.typeText);
+      structPtr->fields.emplace_back(f.name, std::make_unique<Type>(std::move(fieldType)), f.isPrivate);
+    }
+    registerStructMethods(structPtr, decl, displayName, loc);
+    currentTypeParamBindings = bindings;
+    compileStructMethodBodies(*structPtr, decl, displayName);
+  } catch (...) {
+    currentTypeParamBindings = std::move(savedBindings);
+    structs.erase(displayName);
+    throw;
+  }
+
+  currentTypeParamBindings = std::move(savedBindings);
+  return structPtr;
+}
+
+const Compiler::FunctionData *Compiler::instantiateGenericFunc(const GenericFuncTemplate &tmpl, const std::vector<Type> &typeArgs, SourceLoc loc) {
+  const FuncDeclStmt &decl = *tmpl.decl;
+  if (typeArgs.size() != decl.typeParams.size()) {
+    throw std::runtime_error(formatError(loc, std::format("'{}' expects {} type argument(s), got {}.", tmpl.fullName, decl.typeParams.size(), typeArgs.size())));
+  }
+
+  std::string displayName = tmpl.fullName + "<";
+  for (size_t i = 0; i < typeArgs.size(); i++) {
+    if (i != 0) displayName += ",";
+    displayName += typeDisplayName(typeArgs[i]);
+  }
+  displayName += ">";
+  std::string registryKey = displayName;
+  std::transform(registryKey.begin(), registryKey.end(), registryKey.begin(), ::tolower);
+
+  if (auto it = funcs.find(registryKey); it != funcs.end() && !it->second.empty()) return &it->second.front();
+
+  std::unordered_map<std::string, Type> bindings;
+  for (size_t i = 0; i < decl.typeParams.size(); i++) bindings[decl.typeParams[i]] = typeArgs[i];
+
+  std::unordered_map<std::string, Type> savedBindings = std::move(currentTypeParamBindings);
+  currentTypeParamBindings = bindings;
+
+  try {
+    std::optional<Type> retType = std::nullopt;
+    if (decl.returnTypeText.has_value()) retType = parseTypeFromString(*decl.returnTypeText);
+    std::vector<Type> paramTypes;
+    for (const auto &p : decl.params) paramTypes.push_back(parseTypeFromString(p.typeText));
+
+    std::string mangledName = displayName + "_" + randomFunctionMangleString();
+    funcs[registryKey].push_back(
+      {.name = registryKey,
+       .mangledName = mangledName,
+       .returnType = retType,
+       .params = paramTypes,
+       .tag = std::nullopt,
+       .exported = decl.isExport,
+       .internal = true,
+       .isExtern = false,
+       .emitNamespace = datapackNamespace}
+    );
+    const FunctionData *funcData = &funcs[registryKey].back();
+
+    compileFuncDeclBody(decl, funcData, loc);
+
+    currentTypeParamBindings = std::move(savedBindings);
+    return funcData;
+  } catch (...) {
+    currentTypeParamBindings = std::move(savedBindings);
+    funcs.erase(registryKey);
+    throw;
+  }
 }
 
 std::string Compiler::ensureEntityIdInfraCmds() {
@@ -212,6 +376,7 @@ std::string Compiler::compileVariableDeclaration(const VarDeclStmt &decl, Source
 
   const LambdaExpr *lambdaInit = std::get_if<LambdaExpr>(&decl.value->data);
   const DataGetExpr *dataGetInit = std::get_if<DataGetExpr>(&decl.value->data);
+  const StructExpr *structInit = std::get_if<StructExpr>(&decl.value->data);
 
   bool directNumberProvider = false;
   std::string directProviderJson;
@@ -242,6 +407,7 @@ std::string Compiler::compileVariableDeclaration(const VarDeclStmt &decl, Source
   const ExpressionData expr = (directNumberProvider || directBareCopy)    ? ExpressionData{.data = "", .precomputed = false, .type = *declaredType}
                               : (lambdaInit && declaredType.has_value())  ? compileLambdaExpr(*lambdaInit, declaredType, 1, decl.value->loc)
                               : (dataGetInit && declaredType.has_value()) ? compileDataGetExpr(*dataGetInit, declaredType, 1, decl.value->loc)
+                              : (structInit && declaredType.has_value())  ? compileStructExpr(*structInit, declaredType, 1, true, decl.value->loc)
                                                                           : compileExpression(*decl.value);
 
   const bool constant = decl.isConst;
@@ -1107,6 +1273,13 @@ void Compiler::processStructDecl(const StructDeclStmt &decl, SourceLoc loc) {
   if (isBuiltin(decl.name)) throw std::runtime_error(formatError(loc, "Reserved name."));
 
   std::string fullStructName = prefixName(decl.name);
+
+  if (!decl.typeParams.empty()) {
+    if (decl.isExtern) throw std::runtime_error(formatError(loc, "Generic structs cannot be 'extern'."));
+    genericStructTemplates[fullStructName] = GenericStructTemplate{.decl = &decl, .fullName = fullStructName};
+    return;
+  }
+
   StructData structData = {.name = fullStructName, .exported = decl.isExport, .isExtern = decl.isExtern, .uid = nextTypeUid()};
 
   if (decl.parentName.has_value()) {
@@ -1144,6 +1317,10 @@ void Compiler::processStructDecl(const StructDeclStmt &decl, SourceLoc loc) {
 
   StructData *structPtr = &(structs[fullStructName] = std::move(structData));
 
+  registerStructMethods(structPtr, decl, fullStructName, loc);
+}
+
+void Compiler::registerStructMethods(StructData *structPtr, const StructDeclStmt &decl, const std::string &fullStructName, SourceLoc loc) {
   for (const auto &methodDecl : decl.methods) {
     bool isConstructor = (methodDecl.name == decl.name);
     if (isConstructor && methodDecl.isStatic) {
@@ -1263,6 +1440,12 @@ void Compiler::processFuncDeclDeclaration(const FuncDeclStmt &decl, SourceLoc lo
 
   if (isBuiltin(fullName)) throw std::runtime_error(formatError(loc, "Reserved name."));
 
+  if (!decl.typeParams.empty()) {
+    if (decl.isExtern) throw std::runtime_error(formatError(loc, "Generic functions cannot be 'extern'."));
+    genericFuncTemplates[fullName].push_back(GenericFuncTemplate{.decl = &decl, .fullName = prefixName(decl.name)});
+    return;
+  }
+
   std::optional<Type> retType = std::nullopt;
   if (decl.returnTypeText.has_value()) retType = parseTypeFromString(*decl.returnTypeText);
 
@@ -1319,9 +1502,9 @@ void Compiler::processCompilation(const Block &block) {
         } else if constexpr (std::is_same_v<T, VarDeclStmt>) {
           runRecoverable(stmt, [&] { globalInit += compileVariableDeclaration(node, stmt.loc, program.get(), true); });
         } else if constexpr (std::is_same_v<T, FuncDeclStmt>) {
-          runRecoverable(stmt, [&] { compileFuncDecl(node, stmt.loc); });
+          if (node.typeParams.empty()) runRecoverable(stmt, [&] { compileFuncDecl(node, stmt.loc); });
         } else if constexpr (std::is_same_v<T, StructDeclStmt>) {
-          runRecoverable(stmt, [&] { compileStructDecl(node, stmt.loc); });
+          if (node.typeParams.empty()) runRecoverable(stmt, [&] { compileStructDecl(node, stmt.loc); });
         } else if constexpr (std::is_same_v<T, EnumDeclStmt> || std::is_same_v<T, ImportStmt> || std::is_same_v<T, TypeAliasDeclStmt>) {
 
         } else {
@@ -1413,6 +1596,10 @@ void Compiler::compileFuncDecl(const FuncDeclStmt &decl, SourceLoc loc) {
     throw std::runtime_error(formatError(loc, "Compiler Error: Could not find matching function signature in symbol table for '" + fullName + "'."));
   }
 
+  compileFuncDeclBody(decl, currentOverload, loc);
+}
+
+void Compiler::compileFuncDeclBody(const FuncDeclStmt &decl, const FunctionData *funcData, SourceLoc loc) {
   std::string paramSetup = "";
   std::vector<std::pair<std::string, std::string>> refParamCopybacks;
 
@@ -1424,6 +1611,7 @@ void Compiler::compileFuncDecl(const FuncDeclStmt &decl, SourceLoc loc) {
     if (result.refCopyback.has_value()) refParamCopybacks.push_back(result.refCopyback.value());
   }
 
+  std::string savedFuncRefCopybacks = std::move(currentFuncRefCopybacks);
   currentFuncRefCopybacks = "";
   for (const auto &[argsKey, copyBackFuncName] : refParamCopybacks) {
     currentFuncRefCopybacks += std::format("function {}:internal/{} with storage {}:global {}\n", datapackNamespace, copyBackFuncName, datapackNamespace, argsKey);
@@ -1431,7 +1619,8 @@ void Compiler::compileFuncDecl(const FuncDeclStmt &decl, SourceLoc loc) {
 
   std::string funcBody = compileBlock(*decl.body);
   funcBody += currentFuncRefCopybacks;
-  compiledFunctions.push_back({.name = currentOverload->mangledName, .data = paramSetup + funcBody, .tag = currentOverload->tag, .internal = currentOverload->internal});
+  currentFuncRefCopybacks = std::move(savedFuncRefCopybacks);
+  compiledFunctions.push_back({.name = funcData->mangledName, .data = paramSetup + funcBody, .tag = funcData->tag, .internal = funcData->internal});
 }
 
 void Compiler::compileStructDecl(const StructDeclStmt &decl, SourceLoc loc) {
@@ -1442,7 +1631,10 @@ void Compiler::compileStructDecl(const StructDeclStmt &decl, SourceLoc loc) {
     throw std::runtime_error(formatError(loc, "Compiler Error: struct '" + fullStructName + "' missing from symbol table."));
   }
   const StructData &structData = structIt->second;
+  compileStructMethodBodies(structData, decl, fullStructName);
+}
 
+void Compiler::compileStructMethodBodies(const StructData &structData, const StructDeclStmt &decl, const std::string &fullStructName) {
   for (const auto &methodDecl : decl.methods) {
     bool isConstructor = (methodDecl.name == decl.name);
     std::string registryKey = isConstructor ? fullStructName : (fullStructName + "::" + methodDecl.name);
@@ -1511,6 +1703,7 @@ void Compiler::compileStructMethod(const StructData &structData, const StructMet
     if (thisResult.refCopyback.has_value()) refParamCopybacks.push_back(thisResult.refCopyback.value());
   }
 
+  std::string savedFuncRefCopybacks = std::move(currentFuncRefCopybacks);
   currentFuncRefCopybacks = "";
   for (const auto &[argsKey, copyBackFuncName] : refParamCopybacks) {
     currentFuncRefCopybacks += std::format("function {}:internal/{} with storage {}:global {}\n", datapackNamespace, copyBackFuncName, datapackNamespace, argsKey);
@@ -1531,6 +1724,7 @@ void Compiler::compileStructMethod(const StructData &structData, const StructMet
     }
   }
 
+  currentFuncRefCopybacks = std::move(savedFuncRefCopybacks);
   compiledFunctions.push_back({.name = funcData.mangledName, .data = paramSetup + funcBody, .tag = funcData.tag, .internal = funcData.internal});
 
   currentStructContext = previousStructContext;

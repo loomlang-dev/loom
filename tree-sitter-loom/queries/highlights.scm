@@ -43,6 +43,7 @@
 (selector [ "@s" "@r" "@p" "@e" "@a" "@n" ]) @variable.builtin
 (selector) @variable.parameter
 
+(type_param_list param: (identifier) @type)
 (struct_definition name: (identifier) @type)
 (struct_field name: (identifier) @property)
 (struct_method name: (identifier) @method)

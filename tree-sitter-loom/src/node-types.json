@@ -1781,6 +1781,16 @@
             "named": true
           }
         ]
+      },
+      "type_arguments": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "type_arguments",
+            "named": true
+          }
+        ]
       }
     }
   },
@@ -1841,6 +1851,16 @@
             "named": true
           }
         ]
+      },
+      "type_params": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "type_param_list",
+            "named": true
+          }
+        ]
       }
     }
   },
@@ -1872,6 +1892,32 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "generic_type",
+    "named": true,
+    "fields": {
+      "args": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "type",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "namespaced_identifier",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -3612,6 +3658,16 @@
             "named": true
           }
         ]
+      },
+      "type_params": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "type_param_list",
+            "named": true
+          }
+        ]
       }
     },
     "children": {
@@ -3643,6 +3699,16 @@
         "types": [
           {
             "type": "namespaced_identifier",
+            "named": true
+          }
+        ]
+      },
+      "type_arguments": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "type_arguments",
             "named": true
           }
         ]
@@ -4224,6 +4290,10 @@
           "named": true
         },
         {
+          "type": "generic_type",
+          "named": true
+        },
+        {
           "type": "list_type",
           "named": true
         },
@@ -4266,6 +4336,38 @@
         "types": [
           {
             "type": "type",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "type_arguments",
+    "named": true,
+    "fields": {
+      "arg": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "type",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "type_param_list",
+    "named": true,
+    "fields": {
+      "param": {
+        "multiple": true,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
             "named": true
           }
         ]

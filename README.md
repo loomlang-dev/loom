@@ -28,10 +28,13 @@ A programming language that compiles to Minecraft datapacks.
 - [x] Data access
 - [x] Classes
 - [x] Operater overloading
-- [ ] Generics
+- [x] Generics
 - [x] Lambda functions
 - [ ] Inline advancements and dialogs
 - [ ] CLI Utils
+  - [x] Package Management
+  - [ ] Project Initialization
+- [ ] Formatter
 - [ ] Bitwise
 - [x] C++-based parser (allowing for improved error detection)
 - [ ] `try` and `catch`

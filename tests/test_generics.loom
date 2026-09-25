@@ -1,0 +1,41 @@
+struct Box<T> {
+  value: T
+
+  func Box(v: T) {
+    this.value = v;
+  }
+
+  func get(): T {
+    return this.value;
+  }
+}
+
+struct Pair<A, B> {
+  first: A
+  second: B
+}
+
+func identity<T>(x: T): T {
+  return x;
+}
+
+func first<A, B>(p: Pair<A, B>): A {
+  return p.first;
+}
+
+func main() {
+  let a: Box<int> = Box(5);
+  let b: Box<string> = Box("hi");
+  say ${a.get()} ${b.get()};
+
+  let p: Pair<int, string> = Pair::<int, string> { first: 1, second: "two" };
+  say ${p.first} ${p.second};
+
+  let n: int = identity(42);
+  let s: string = identity::<string>("explicit");
+  say ${n} ${s};
+
+  let nested: Box<Box<int>> = Box::<Box<int>>(Box(7));
+  let inner: Box<int> = nested.get();
+  say ${inner.get()};
+}

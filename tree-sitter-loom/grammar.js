@@ -29,11 +29,13 @@ module.exports = grammar({
   conflicts: ($) => [
     [$.selector],
     [$.namespaced_identifier, $.namespaced_arg],
+    [$.namespaced_identifier],
     [$.struct_field, $.struct_method],
     [$.struct_field, $.class_method],
     [$.class_method, $.class_operator_method],
     [$.enum_definition, $.struct_definition, $.class_definition, $.type_alias_definition, $._modifier],
     [$.paren_type, $._function_type_param],
+    [$.type, $.generic_type],
   ],
 
   rules: {
@@ -115,6 +117,7 @@ module.exports = grammar({
         optional("extern"),
         "struct",
         field("name", $.identifier),
+        optional(field("type_params", $.type_param_list)),
         "{",
         repeat($._newline),
         repeat(
@@ -209,6 +212,7 @@ module.exports = grammar({
     struct_expression: ($) =>
       seq(
         field("name", $.namespaced_identifier),
+        optional(seq("::", field("type_arguments", $.type_arguments))),
         "{",
         optional($._newline),
         multilineCommaSep($.struct_expression_field),
@@ -267,6 +271,7 @@ module.exports = grammar({
         repeat($._modifier),
         "func",
         field("name", $.identifier),
+        optional(field("type_params", $.type_param_list)),
         "(",
         field("parameters", commaSep($.parameter)),
         ")",
@@ -622,6 +627,7 @@ module.exports = grammar({
     function_call: ($) =>
       seq(
         field("name", $.namespaced_identifier),
+        optional(seq("::", field("type_arguments", $.type_arguments))),
         "(",
         field("arguments", commaSep($._expression)),
         ")",
@@ -671,7 +677,19 @@ module.exports = grammar({
     identifier: () => /[a-z_][a-z0-9_]*/i,
 
     type: ($) =>
-      choice($.namespaced_identifier, $.list_type, $.ref_type, $.paren_type, $.map_type, $.function_type),
+      choice($.namespaced_identifier, $.list_type, $.ref_type, $.paren_type, $.map_type, $.function_type, $.generic_type),
+    generic_type: ($) =>
+      seq(
+        field("name", $.namespaced_identifier),
+        "<",
+        field("args", $.type),
+        repeat(seq(",", field("args", $.type))),
+        ">",
+      ),
+    type_param_list: ($) =>
+      seq("<", field("param", $.identifier), repeat(seq(",", field("param", $.identifier))), ">"),
+    type_arguments: ($) =>
+      seq("<", field("arg", $.type), repeat(seq(",", field("arg", $.type))), ">"),
     list_type: ($) => seq($.type, "[]"),
     ref_type: ($) => prec(1, seq("&", $.type)),
     paren_type: ($) => seq("(", $.type, ")"),

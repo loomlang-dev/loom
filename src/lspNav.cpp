@@ -51,6 +51,8 @@ std::string baseTypeName(const std::string &raw) {
     end -= 2;
     while (end > start && raw[end - 1] == ' ') end--;
   }
+  if (size_t lt = raw.find('<', start); lt != std::string::npos && lt < end) end = lt;
+  while (end > start && raw[end - 1] == ' ') end--;
   return raw.substr(start, end - start);
 }
 

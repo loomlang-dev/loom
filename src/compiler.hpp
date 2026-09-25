@@ -312,6 +312,20 @@ private:
   std::unordered_map<std::string, TypeAliasData> typeAliases;
   std::vector<CompiledFunction> compiledFunctions;
 
+  struct GenericStructTemplate {
+    const StructDeclStmt *decl = nullptr;
+    std::string fullName;
+  };
+  std::unordered_map<std::string, GenericStructTemplate> genericStructTemplates;
+
+  struct GenericFuncTemplate {
+    const FuncDeclStmt *decl = nullptr;
+    std::string fullName;
+  };
+  std::unordered_map<std::string, std::vector<GenericFuncTemplate>> genericFuncTemplates;
+
+  std::unordered_map<std::string, Type> currentTypeParamBindings;
+
   std::vector<std::unique_ptr<Compiler>> importedCompilers;
 
   std::unordered_map<std::string, BuiltinCompileCallback> builtins;
@@ -345,6 +359,20 @@ private:
   void processHeaderOnlyVarDecls(const Block &block);
   void processCompilation(const Block &block);
   void processStructDecl(const StructDeclStmt &decl, SourceLoc loc);
+  void registerStructMethods(StructData *structPtr, const StructDeclStmt &decl, const std::string &fullStructName, SourceLoc loc);
+
+  std::string typeDisplayName(const Type &type) const;
+  StructData *instantiateGenericStruct(const GenericStructTemplate &tmpl, const std::vector<Type> &typeArgs, SourceLoc loc);
+  const FunctionData *instantiateGenericFunc(const GenericFuncTemplate &tmpl, const std::vector<Type> &typeArgs, SourceLoc loc);
+
+  std::vector<Type> resolveGenericTypeArgs(
+    const std::vector<std::string> &typeParamNames,
+    const std::vector<std::string> &explicitTypeArgTexts,
+    const std::vector<Param> &declParams,
+    const std::vector<const Expr *> &argNodes,
+    const std::string &displayName,
+    SourceLoc loc
+  );
   void processEnumDecl(const EnumDeclStmt &decl, SourceLoc loc);
   void processTypeAliasDecl(const TypeAliasDeclStmt &decl, SourceLoc loc);
   void processFuncDeclDeclaration(const FuncDeclStmt &decl, SourceLoc loc);
@@ -352,7 +380,9 @@ private:
   void processDependencyImportDecl(const ImportStmt &decl, SourceLoc loc);
   bool depShouldEmbed(const std::string &depName) const;
   void compileFuncDecl(const FuncDeclStmt &decl, SourceLoc loc);
+  void compileFuncDeclBody(const FuncDeclStmt &decl, const FunctionData *funcData, SourceLoc loc);
   void compileStructDecl(const StructDeclStmt &decl, SourceLoc loc);
+  void compileStructMethodBodies(const StructData &structData, const StructDeclStmt &decl, const std::string &fullStructName);
   void compileStructMethod(const StructData &structData, const StructMethodDecl &methodDecl, const FunctionData &funcData);
 
   struct ParamSetupResult {
@@ -400,6 +430,8 @@ private:
   );
 
   ExpressionData compileSuperCall(const std::vector<const Expr *> &argNodes, unsigned int id, SourceLoc loc);
+
+  ExpressionData compileStructExpr(const StructExpr &n, std::optional<Type> expectedType, unsigned int id, bool precompute, SourceLoc loc);
 
   ExpressionData compileLambdaExpr(const LambdaExpr &n, std::optional<Type> expectedType, unsigned int id, SourceLoc loc);
 
@@ -489,7 +521,7 @@ public:
 
   std::optional<VariableData> lookupVariable(const std::string &name) const;
 
-  Type parseTypeFromString(const std::string &typeText) const;
+  Type parseTypeFromString(const std::string &typeText);
 
   std::string copyExprInto(const ExpressionData &expr, const std::string &destPath, unsigned int computedAtId) const;
 

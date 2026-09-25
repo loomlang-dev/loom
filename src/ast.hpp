@@ -81,6 +81,7 @@ struct ElementExpr {
 struct CallExpr {
   std::string name;
   SourceLoc nameLoc;
+  std::vector<std::string> explicitTypeArgs;
   std::vector<std::unique_ptr<Expr>> arguments;
 };
 
@@ -108,6 +109,7 @@ struct StructExprField {
 };
 struct StructExpr {
   std::string name;
+  std::vector<std::string> explicitTypeArgs;
   std::vector<StructExprField> fields;
 };
 
@@ -223,6 +225,7 @@ struct FuncDeclStmt {
   bool isExtern = false;
   std::string name;
   SourceLoc nameLoc;
+  std::vector<std::string> typeParams;
   std::vector<Param> params;
   std::optional<std::string> returnTypeText;
   SourceLoc returnTypeLoc;
@@ -258,6 +261,7 @@ struct StructDeclStmt {
   bool isClass = false;
   std::string name;
   SourceLoc nameLoc;
+  std::vector<std::string> typeParams;
   std::optional<std::string> parentName;
   SourceLoc parentLoc;
   std::vector<StructFieldDecl> fields;

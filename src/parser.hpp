@@ -56,6 +56,8 @@ private:
 
   std::string parseTypeText();
   std::string parseTypeText(SourceLoc &outLoc);
+  std::vector<std::string> parseTypeParamList();
+  std::vector<std::string> tryParseTurbofishArgs();
   std::string parseSelectorText();
   std::string parseNamespacedArgText();
   std::string parseImportPathText();

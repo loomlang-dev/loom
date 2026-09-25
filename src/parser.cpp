@@ -50,12 +50,36 @@ std::unique_ptr<Expr> Parser::makeExpr(const Token &startTok, decltype(Expr::dat
 
 std::string Parser::parseNamespacedIdentifier() {
   std::string result(expect(TokenKind::Identifier, "identifier").text);
-  while (check(TokenKind::ColonColon)) {
+  while (check(TokenKind::ColonColon) && peek(1).kind == TokenKind::Identifier) {
     advance();
     result += "::";
     result += expect(TokenKind::Identifier, "identifier after '::'").text;
   }
   return result;
+}
+
+std::vector<std::string> Parser::parseTypeParamList() {
+  std::vector<std::string> typeParams;
+  if (!match(TokenKind::Lt)) return typeParams;
+  typeParams.push_back(std::string(expect(TokenKind::Identifier, "type parameter name").text));
+  while (match(TokenKind::Comma)) {
+    typeParams.push_back(std::string(expect(TokenKind::Identifier, "type parameter name").text));
+  }
+  expect(TokenKind::Gt, "'>' to close type parameter list");
+  return typeParams;
+}
+
+std::vector<std::string> Parser::tryParseTurbofishArgs() {
+  std::vector<std::string> args;
+  if (!check(TokenKind::ColonColon) || peek(1).kind != TokenKind::Lt) return args;
+  advance();
+  advance();
+  args.push_back(parseTypeText());
+  while (match(TokenKind::Comma)) {
+    args.push_back(parseTypeText());
+  }
+  expect(TokenKind::Gt, "'>' to close explicit type argument list");
+  return args;
 }
 
 static void parseTypeTextInner(Parser &self);
@@ -129,19 +153,27 @@ static void parseTypeTextInner(Parser &self) {
     return;
   }
   std::string ident = self.parseNamespacedIdentifier();
+  auto parseInnerType = [&self] {
+    parseTypeTextInner(self);
+    while (self.check(TokenKind::LBracket)) {
+      self.advance();
+      self.expect(TokenKind::RBracket, "']' to close list type");
+    }
+  };
   if (ident == "map" && self.check(TokenKind::Lt)) {
     self.advance();
-    auto parseInnerType = [&self] {
-      parseTypeTextInner(self);
-      while (self.check(TokenKind::LBracket)) {
-        self.advance();
-        self.expect(TokenKind::RBracket, "']' to close list type");
-      }
-    };
     parseInnerType();
     self.expect(TokenKind::Comma, "',' between map key and value types");
     parseInnerType();
     self.expect(TokenKind::Gt, "'>' to close map type");
+  } else if (self.check(TokenKind::Lt)) {
+    self.advance();
+    parseInnerType();
+    while (self.check(TokenKind::Comma)) {
+      self.advance();
+      parseInnerType();
+    }
+    self.expect(TokenKind::Gt, "'>' to close generic type argument list");
   }
 }
 
@@ -521,12 +553,15 @@ std::unique_ptr<Expr> Parser::parsePrimary() {
       nameLoc.endByte = previous().endByte;
     }
 
+    std::vector<std::string> explicitTypeArgs = tryParseTurbofishArgs();
+    if (!explicitTypeArgs.empty()) nameLoc.endByte = previous().endByte;
+
     if (check(TokenKind::LParen)) {
       advance();
       std::vector<std::unique_ptr<Expr>> args;
       parseCommaSeparated(*this, TokenKind::RParen, false, [&] { args.push_back(parseExpression()); });
       expect(TokenKind::RParen, "')' to close call arguments");
-      return makeExpr(tok, CallExpr{.name = std::move(name), .nameLoc = nameLoc, .arguments = std::move(args)});
+      return makeExpr(tok, CallExpr{.name = std::move(name), .nameLoc = nameLoc, .explicitTypeArgs = std::move(explicitTypeArgs), .arguments = std::move(args)});
     }
 
     if (check(TokenKind::LBrace)) {
@@ -539,9 +574,13 @@ std::unique_ptr<Expr> Parser::parsePrimary() {
         fields.push_back(StructExprField{.name = std::move(fieldName), .value = std::move(value)});
       });
       expect(TokenKind::RBrace, "'}' to close struct literal");
-      auto structExpr = makeExpr(tok, StructExpr{.name = std::move(name), .fields = std::move(fields)});
+      auto structExpr = makeExpr(tok, StructExpr{.name = std::move(name), .explicitTypeArgs = std::move(explicitTypeArgs), .fields = std::move(fields)});
       structExpr->loc = nameLoc;
       return structExpr;
+    }
+
+    if (!explicitTypeArgs.empty()) {
+      error(tok, "Explicit type arguments ('::<...>') can only be used on a function call or struct literal.");
     }
 
     auto varExpr = makeExpr(tok, VarRefExpr{.name = std::move(name)});
@@ -890,6 +929,7 @@ std::unique_ptr<Stmt> Parser::parseFuncDecl(std::optional<std::string> tag, bool
   const Token &nameTok = expect(TokenKind::Identifier, "function name");
   std::string name(nameTok.text);
   SourceLoc nameLoc = locOf(nameTok);
+  std::vector<std::string> typeParams = parseTypeParamList();
   expect(TokenKind::LParen, "'(' after function name");
   std::vector<Param> params;
   parseCommaSeparated(*this, TokenKind::RParen, false, [&] {
@@ -914,6 +954,7 @@ std::unique_ptr<Stmt> Parser::parseFuncDecl(std::optional<std::string> tag, bool
       .isExtern = isExtern,
       .name = std::move(name),
       .nameLoc = nameLoc,
+      .typeParams = std::move(typeParams),
       .params = std::move(params),
       .returnTypeText = std::move(returnTypeText),
       .returnTypeLoc = returnTypeLoc,
@@ -928,6 +969,10 @@ std::unique_ptr<Stmt> Parser::parseStructDecl(bool isExport, bool isExtern, bool
   const Token &nameTok = expect(TokenKind::Identifier, "struct name");
   std::string name(nameTok.text);
   SourceLoc nameLoc = locOf(nameTok);
+  std::vector<std::string> typeParams = parseTypeParamList();
+  if (!typeParams.empty() && isClass) {
+    error(nameTok, "Generic classes are not supported yet; only 'struct' may declare type parameters.");
+  }
 
   std::optional<std::string> parentName;
   SourceLoc parentLoc;
@@ -971,8 +1016,18 @@ std::unique_ptr<Stmt> Parser::parseStructDecl(bool isExport, bool isExtern, bool
 
       const Token &opTok = peek();
       static const std::unordered_set<TokenKind> kOperatorTokens = {
-        TokenKind::Plus, TokenKind::Minus, TokenKind::Star,  TokenKind::Slash, TokenKind::Percent, TokenKind::EqEq,
-        TokenKind::BangEq, TokenKind::Lt, TokenKind::Gt, TokenKind::LtEq, TokenKind::GtEq, TokenKind::Bang,
+        TokenKind::Plus,
+        TokenKind::Minus,
+        TokenKind::Star,
+        TokenKind::Slash,
+        TokenKind::Percent,
+        TokenKind::EqEq,
+        TokenKind::BangEq,
+        TokenKind::Lt,
+        TokenKind::Gt,
+        TokenKind::LtEq,
+        TokenKind::GtEq,
+        TokenKind::Bang,
       };
       if (!kOperatorTokens.contains(opTok.kind)) {
         error(opTok, "Expected an operator symbol (e.g. '+', '==') after 'operator'.");
@@ -1082,6 +1137,7 @@ std::unique_ptr<Stmt> Parser::parseStructDecl(bool isExport, bool isExtern, bool
       .isClass = isClass,
       .name = std::move(name),
       .nameLoc = nameLoc,
+      .typeParams = std::move(typeParams),
       .parentName = std::move(parentName),
       .parentLoc = parentLoc,
       .fields = std::move(fields),
@@ -1317,6 +1373,8 @@ std::unique_ptr<Stmt> Parser::tryParseAssignOrCallStmt() {
     std::string name = parseNamespacedIdentifier();
     SourceLoc nameLoc = locOf(startTok);
     nameLoc.endByte = previous().endByte;
+    std::vector<std::string> explicitTypeArgs = tryParseTurbofishArgs();
+    if (!explicitTypeArgs.empty()) nameLoc.endByte = previous().endByte;
     std::unique_ptr<Expr> expr;
 
     if (check(TokenKind::LParen)) {
@@ -1324,7 +1382,9 @@ std::unique_ptr<Stmt> Parser::tryParseAssignOrCallStmt() {
       std::vector<std::unique_ptr<Expr>> args;
       parseCommaSeparated(*this, TokenKind::RParen, false, [&] { args.push_back(parseExpression()); });
       expect(TokenKind::RParen, "')' to close call arguments");
-      expr = makeExpr(startTok, CallExpr{.name = std::move(name), .nameLoc = nameLoc, .arguments = std::move(args)});
+      expr = makeExpr(startTok, CallExpr{.name = std::move(name), .nameLoc = nameLoc, .explicitTypeArgs = std::move(explicitTypeArgs), .arguments = std::move(args)});
+    } else if (!explicitTypeArgs.empty()) {
+      error(startTok, "Explicit type arguments ('::<...>') can only be used on a function call or struct literal.");
     } else {
       expr = makeExpr(startTok, VarRefExpr{.name = std::move(name)});
       expr->loc = nameLoc;
