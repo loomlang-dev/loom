@@ -31,6 +31,7 @@ module.exports = grammar({
     [$.namespaced_identifier, $.namespaced_arg],
     [$.struct_field, $.struct_method],
     [$.struct_field, $.class_method],
+    [$.class_method, $.class_operator_method],
     [$.enum_definition, $.struct_definition, $.class_definition, $.type_alias_definition, $._modifier],
     [$.paren_type, $._function_type_param],
   ],
@@ -118,7 +119,7 @@ module.exports = grammar({
         repeat($._newline),
         repeat(
           seq(
-            choice($.struct_field, $.struct_method),
+            choice($.struct_field, $.struct_method, $.struct_operator_method),
             optional(","),
             repeat($._newline),
           ),
@@ -148,6 +149,20 @@ module.exports = grammar({
         field("block", $.block),
       ),
 
+    struct_operator_method: ($) =>
+      seq(
+        "operator",
+        field("operator", $._operator_symbol),
+        "(",
+        field("parameters", commaSep($.parameter)),
+        ")",
+        optional(seq(":", field("type", $.type))),
+        field("block", $.block),
+      ),
+
+    _operator_symbol: () =>
+      choice("+", "-", "*", "/", "%", "==", "!=", "<", ">", "<=", ">=", "!"),
+
     class_definition: ($) =>
       seq(
         optional("export"),
@@ -159,7 +174,7 @@ module.exports = grammar({
         repeat($._newline),
         repeat(
           seq(
-            choice($.struct_field, $.class_method),
+            choice($.struct_field, $.class_method, $.class_operator_method),
             optional(","),
             repeat($._newline),
           ),
@@ -172,6 +187,18 @@ module.exports = grammar({
         repeat(choice($._visibility_modifier, "static", "virtual", "override")),
         "func",
         field("name", $.identifier),
+        "(",
+        field("parameters", commaSep($.parameter)),
+        ")",
+        optional(seq(":", field("type", $.type))),
+        field("block", $.block),
+      ),
+
+    class_operator_method: ($) =>
+      seq(
+        repeat(choice("virtual", "override")),
+        "operator",
+        field("operator", $._operator_symbol),
         "(",
         field("parameters", commaSep($.parameter)),
         ")",

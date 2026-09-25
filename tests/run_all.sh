@@ -83,6 +83,24 @@ for f in "$TEST_DIR"/*.loom; do
     fi
   fi
 
+  if [ "$name" = "test_operator_overload" ]; then
+    if ! grep -rq "operator_add" "$od/data"; then
+      echo "FAIL: $name did not emit an operator+ overload function"
+      failures=$((failures+1))
+      continue
+    fi
+    if ! grep -rq "__vtbl_operator_add" "$od/data"; then
+      echo "FAIL: $name did not emit a vtable field for the virtual operator overload"
+      failures=$((failures+1))
+      continue
+    fi
+    if ! grep -rq "internal_call_ref" "$od/data"; then
+      echo "FAIL: $name did not emit an indirect call for the virtual operator dispatch"
+      failures=$((failures+1))
+      continue
+    fi
+  fi
+
   if [ "$name" = "test_data_access" ]; then
     if ! grep -rq "set from entity @s Health" "$od/data"; then
       echo "FAIL: $name did not emit a direct entity NBT read"

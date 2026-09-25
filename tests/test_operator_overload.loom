@@ -1,0 +1,44 @@
+struct Vec2 {
+  x: int
+  y: int
+
+  operator +(other: Vec2): Vec2 {
+    return Vec2 { x: this.x + other.x, y: this.y + other.y };
+  }
+
+  operator ==(other: Vec2): bool {
+    return this.x == other.x && this.y == other.y;
+  }
+
+  operator -(): Vec2 {
+    return Vec2 { x: -this.x, y: -this.y };
+  }
+}
+
+class Shape {
+  func Shape() {}
+  virtual operator +(other: int): int {
+    return 0;
+  }
+}
+
+class Circle extends Shape {
+  radius: int
+  func Circle(r: int) { super(); this.radius = r; }
+  override operator +(other: int): int {
+    return this.radius + other;
+  }
+}
+
+func main() {
+  let a: Vec2 = Vec2 { x: 1, y: 2 };
+  let b: Vec2 = Vec2 { x: 3, y: 4 };
+  let sum: Vec2 = a + b + a;
+  let eq: bool = (a == b);
+  let neg: Vec2 = -a;
+  say ${sum.x} ${sum.y} ${eq} ${neg.x} ${neg.y};
+
+  let s: Shape = Circle(5);
+  let r: int = s + 10;
+  say ${r};
+}

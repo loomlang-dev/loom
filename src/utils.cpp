@@ -32,3 +32,19 @@ std::string formatError(SourceLoc loc, const std::string &message) {
   if (loc.line == 0) return message;
   return std::format("line {}, col {}: {}", loc.line, loc.col, message);
 }
+
+std::string operatorSlug(const std::string &op, bool isUnary) {
+  if (op == "+") return "add";
+  if (op == "-") return isUnary ? "neg" : "sub";
+  if (op == "*") return "mul";
+  if (op == "/") return "div";
+  if (op == "%") return "mod";
+  if (op == "==") return "eq";
+  if (op == "!=") return "ne";
+  if (op == "<") return "lt";
+  if (op == ">") return "gt";
+  if (op == "<=") return "le";
+  if (op == ">=") return "ge";
+  if (op == "!") return "not";
+  return "";
+}

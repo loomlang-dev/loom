@@ -245,6 +245,7 @@ struct StructMethodDecl {
   bool isStatic = false;
   bool isVirtual = false;
   bool isOverride = false;
+  std::optional<std::string> operatorOp;
   std::vector<Param> params;
   std::optional<std::string> returnTypeText;
   SourceLoc returnTypeLoc;

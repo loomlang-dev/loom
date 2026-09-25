@@ -210,6 +210,88 @@ Compiler::ExpressionData Compiler::compileSuperCall(const std::vector<const Expr
   return {.data = ret, .precomputed = false, .type = Type::IntegerType()};
 }
 
+Compiler::ExpressionData Compiler::compileOperatorCall(
+  const StructData &structRef, const std::string &op, const ExpressionData &left, std::optional<ExpressionData> right, unsigned int id, SourceLoc loc
+) {
+  bool isUnary = !right.has_value();
+
+  const FunctionData *rep = nullptr;
+  for (const StructData *s = &structRef; s != nullptr; s = s->parent) {
+    const auto &m = isUnary ? s->unaryOperatorOverloads : s->operatorOverloads;
+    auto it = m.find(op);
+    if (it != m.end()) {
+      rep = it->second;
+      break;
+    }
+  }
+  if (!rep) {
+    throw std::runtime_error(
+      formatError(loc, std::format("Struct '{}' does not overload the {} operator '{}'.", structRef.name, isUnary ? "unary" : "binary", op))
+    );
+  }
+
+  auto materializeInto = [this](const ExpressionData &val, unsigned int valueId, const std::string &destMangled) -> std::string {
+    if (val.precomputed) {
+      return std::format("data modify storage {}:global vars.{} set value {}\n", datapackNamespace, destMangled, val.data);
+    }
+    std::string cmds = val.data + "\n";
+    if (val.type.isString() || val.type.isList() || val.type.isMap() || val.type.isStruct() || val.type.isRef()) {
+      cmds += std::format("data modify storage {0}:global vars.{1} set from storage {0}:global expr_str{2}\n", datapackNamespace, destMangled, valueId);
+    } else if (val.type.isFloat()) {
+      cmds += std::format("data modify storage {0}:global vars.{1} set from storage {0}:global expr_float{2}\n", datapackNamespace, destMangled, valueId);
+    } else {
+      cmds += std::format("execute store result storage {0}:global vars.{1} int 1 run scoreboard players get expr_output{2} temp\n", datapackNamespace, destMangled, valueId);
+    }
+    return cmds;
+  };
+
+  std::string selfMangled = "__opself_" + randomMangleString();
+  std::string setup = materializeInto(left, id, selfMangled);
+  ExpressionData implicitSelf = {.data = std::format("\"{}\"", selfMangled), .precomputed = true, .type = Type::RefTypeOf(left.type)};
+
+  std::vector<const Expr *> argNodes;
+  Expr rhsNode;
+  std::string rhsMangled;
+  if (!isUnary) {
+    if (rep->params.empty()) {
+      throw std::runtime_error(formatError(loc, std::format("Compiler Error: operator '{}' overload on '{}' has no right-hand parameter.", op, structRef.name)));
+    }
+    rhsMangled = "__oprhs_" + randomMangleString();
+    setup += materializeInto(*right, id + 1, rhsMangled);
+    vars.emplace(
+      rhsMangled,
+      VariableData{
+        .name = rhsMangled,
+        .mangledName = rhsMangled,
+        .type = right->type,
+        .scope = nullptr,
+        .value = std::nullopt,
+        .constant = false,
+        .emitNamespace = datapackNamespace,
+      }
+    );
+    rhsNode.loc = loc;
+    rhsNode.data = VarRefExpr{.name = rhsMangled};
+    argNodes.push_back(&rhsNode);
+  }
+
+  std::string methodNameLower = "operator_" + operatorSlug(op, isUnary);
+
+  ExpressionData callResult;
+  auto vtableIt = structRef.vtableMethods.find(methodNameLower);
+  if (vtableIt != structRef.vtableMethods.end()) {
+    callResult = compileVirtualMethodCall(structRef, selfMangled, methodNameLower, *rep, implicitSelf, argNodes, id, loc);
+  } else {
+    std::vector<FunctionData> overloads = {*rep};
+    callResult = compileFunctionInvocation(overloads, rep->name, argNodes, implicitSelf, id, false, loc);
+  }
+
+  if (!isUnary) vars.erase(rhsMangled);
+
+  callResult.data = setup + callResult.data;
+  return callResult;
+}
+
 Compiler::ExpressionData Compiler::compileFunctionInvocation(
   const std::vector<FunctionData> &overloads,
   const std::string &displayName,

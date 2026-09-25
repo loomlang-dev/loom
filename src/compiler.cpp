@@ -1117,6 +1117,8 @@ void Compiler::processStructDecl(const StructDeclStmt &decl, SourceLoc loc) {
     structData.parent = &parentIt->second;
     structData.fields = parentIt->second.fields;
     structData.vtableMethods = parentIt->second.vtableMethods;
+    structData.operatorOverloads = parentIt->second.operatorOverloads;
+    structData.unaryOperatorOverloads = parentIt->second.unaryOperatorOverloads;
   }
 
   for (const auto &f : decl.fields) {
@@ -1237,6 +1239,12 @@ void Compiler::processStructDecl(const StructDeclStmt &decl, SourceLoc loc) {
 
     if (methodDecl.isVirtual || methodDecl.isOverride) {
       structPtr->vtableMethods[methodNameLower] = &funcs[registryKey].back();
+    }
+
+    if (methodDecl.operatorOp.has_value()) {
+      bool isUnaryOp = methodDecl.params.empty();
+      auto &opMap = isUnaryOp ? structPtr->unaryOperatorOverloads : structPtr->operatorOverloads;
+      opMap[*methodDecl.operatorOp] = &funcs[registryKey].back();
     }
 
     if (isConstructor) structPtr->hasConstructor = true;
@@ -1375,7 +1383,7 @@ Compiler::ParamSetupResult Compiler::setupIncomingParameter(const std::string &p
     result.setup += std::format("function {}:internal/{} with storage {}:global {}\n", datapackNamespace, copyInFuncName, datapackNamespace, argsKey);
 
   } else {
-    if (paramType.isString() || paramType.isList() || paramType.isMap() || paramType.isFloat()) {
+    if (paramType.isString() || paramType.isList() || paramType.isMap() || paramType.isStruct() || paramType.isFloat()) {
       result.setup += std::format("data modify storage {0}:global vars.{1} set from storage {2}:stack regs[-1]\n", datapackNamespace, mangledName, callStackNamespace);
     } else {
       result.setup += std::format("execute store result score {1} vars run data get storage {0}:stack regs[-1]\n", callStackNamespace, mangledName);

@@ -1,7 +1,9 @@
 #include "parser.hpp"
+#include "utils.hpp"
 
 #include <cctype>
 #include <format>
+#include <unordered_set>
 
 static std::string formatParseError(SourceLoc loc, const std::string &message) { return std::format("line {}, col {}: {}", loc.line, loc.col, message); }
 
@@ -961,7 +963,68 @@ std::unique_ptr<Stmt> Parser::parseStructDecl(bool isExport, bool isExtern, bool
     if (isVirtual && isOverride) error(peek(), "A method cannot be both 'virtual' and 'override'.");
     if ((isVirtual || isOverride) && isStatic) error(peek(), "A static method cannot be 'virtual' or 'override'.");
 
-    if (check(TokenKind::KwFunc)) {
+    if (checkIdentifierText("operator")) {
+      const Token &operatorStartTok = peek();
+      advance();
+      if (isPrivate || isPublic) error(operatorStartTok, "Operator overloads cannot be marked 'public' or 'private'.");
+      if (isStatic) error(operatorStartTok, "Operator overloads cannot be marked 'static'.");
+
+      const Token &opTok = peek();
+      static const std::unordered_set<TokenKind> kOperatorTokens = {
+        TokenKind::Plus, TokenKind::Minus, TokenKind::Star,  TokenKind::Slash, TokenKind::Percent, TokenKind::EqEq,
+        TokenKind::BangEq, TokenKind::Lt, TokenKind::Gt, TokenKind::LtEq, TokenKind::GtEq, TokenKind::Bang,
+      };
+      if (!kOperatorTokens.contains(opTok.kind)) {
+        error(opTok, "Expected an operator symbol (e.g. '+', '==') after 'operator'.");
+      }
+      std::string op(opTok.text);
+      advance();
+
+      expect(TokenKind::LParen, "'(' after operator symbol");
+      std::vector<Param> params;
+      parseCommaSeparated(*this, TokenKind::RParen, false, [&] {
+        const Token &pnameTok = expect(TokenKind::Identifier, "parameter name");
+        std::string pname(pnameTok.text);
+        SourceLoc pnameLoc = locOf(pnameTok);
+        expect(TokenKind::Colon, "':' after parameter name");
+        SourceLoc ptypeLoc;
+        std::string ptype = parseTypeText(ptypeLoc);
+        params.push_back(Param{.name = std::move(pname), .loc = pnameLoc, .typeText = std::move(ptype), .typeLoc = ptypeLoc});
+      });
+      expect(TokenKind::RParen, "')' to close parameter list");
+
+      bool isUnary = params.empty();
+      if (op != "-" && op != "!" && isUnary) {
+        error(operatorStartTok, "Operator '" + op + "' requires exactly one parameter (the right-hand operand).");
+      }
+      if (op == "!" && !isUnary) {
+        error(operatorStartTok, "Operator '!' only supports a unary (zero-parameter) overload.");
+      }
+      if (!isUnary && params.size() != 1) {
+        error(operatorStartTok, "Operator overloads take at most one parameter (the right-hand operand).");
+      }
+
+      std::optional<std::string> returnTypeText;
+      SourceLoc returnTypeLoc;
+      if (match(TokenKind::Colon)) returnTypeText = parseTypeText(returnTypeLoc);
+      auto body = parseBlock();
+      methods.push_back(
+        StructMethodDecl{
+          .loc = locOf(operatorStartTok),
+          .name = "operator_" + operatorSlug(op, isUnary),
+          .nameLoc = locOf(opTok),
+          .isPrivate = false,
+          .isStatic = false,
+          .isVirtual = isVirtual,
+          .isOverride = isOverride,
+          .operatorOp = op,
+          .params = std::move(params),
+          .returnTypeText = std::move(returnTypeText),
+          .returnTypeLoc = returnTypeLoc,
+          .body = std::move(body)
+        }
+      );
+    } else if (check(TokenKind::KwFunc)) {
       const Token &methodStartTok = peek();
       advance();
       const Token &mnameTok = expect(TokenKind::Identifier, "method name");

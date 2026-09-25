@@ -212,6 +212,9 @@ public:
     const StructData *parent = nullptr;
     std::unordered_map<std::string, const FunctionData *> vtableMethods;
 
+    std::unordered_map<std::string, const FunctionData *> operatorOverloads;
+    std::unordered_map<std::string, const FunctionData *> unaryOperatorOverloads;
+
     uint64_t uid = 0;
   };
 
@@ -472,6 +475,9 @@ public:
 
   const std::string &getDatapackNamespace() const { return datapackNamespace; }
   const StructData *getCurrentStructContext() const { return currentStructContext; }
+
+  ExpressionData
+  compileOperatorCall(const StructData &structRef, const std::string &op, const ExpressionData &left, std::optional<ExpressionData> right, unsigned int id, SourceLoc loc);
 
   void addCompiledFunction(const CompiledFunction &func) { compiledFunctions.push_back(func); }
 

@@ -6,7 +6,10 @@
 ["public" "private" "static"] @keyword.storage
 ["let" "const" "enum" "struct" "class" "type" "data" "namespace"] @keyword.storage
 ["virtual" "override"] @keyword.storage
+"operator" @keyword.storage
 (class_definition "extends" @keyword.storage)
+(struct_operator_method operator: _ @operator)
+(class_operator_method operator: _ @operator)
 (function_call name: (namespaced_identifier) @keyword.function (#eq? @keyword.function "super"))
 (data_get_expression ["storage" "entity" "block"] @keyword.conditional)
 (data_set_statement ["storage" "entity" "block"] @keyword.conditional)

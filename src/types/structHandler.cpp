@@ -9,6 +9,19 @@ class StructHandler : public TypeHandler {
 public:
   bool handles(const Compiler::Type &type) const override { return type.kind == Compiler::Type::Struct; }
 
+  std::optional<Compiler::ExpressionData> compileBinaryOp(
+    Compiler &compiler, std::string_view op, const Compiler::ExpressionData &left, const Compiler::ExpressionData &right, unsigned int id, bool precompute, SourceLoc loc
+  ) const override {
+    if (!left.type.structRef) return std::nullopt;
+    return compiler.compileOperatorCall(*left.type.structRef, std::string(op), left, right, id, loc);
+  }
+
+  std::optional<Compiler::ExpressionData>
+  compileUnaryOp(Compiler &compiler, std::string_view op, const Compiler::ExpressionData &operand, unsigned int id, bool precompute, SourceLoc loc) const override {
+    if (!operand.type.structRef) return std::nullopt;
+    return compiler.compileOperatorCall(*operand.type.structRef, std::string(op), operand, std::nullopt, id, loc);
+  }
+
   std::optional<Compiler::ExpressionData> compileMemberExpression(
     Compiler &compiler, const Compiler::ExpressionData &object, std::string_view property, unsigned int id, bool precompute, SourceLoc loc
   ) const override {

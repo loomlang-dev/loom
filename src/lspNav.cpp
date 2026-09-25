@@ -1337,6 +1337,7 @@ void addFieldsAndMethods(
     }
   }
   for (const auto &m : s.methods) {
+    if (m.operatorOp.has_value()) continue;
     if (m.isPrivate && !showPrivate) continue;
     if (m.isStatic != wantStatic) continue;
     if (!seen.insert("m:" + m.name).second) continue;
