@@ -57,6 +57,32 @@ for f in "$TEST_DIR"/*.loom; do
     continue
   fi
 
+  if [ "$name" = "test_float_math" ]; then
+    if ! grep -rq "set compute default float" "$od/data"; then
+      echo "FAIL: $name did not emit any collapsed float number-provider commands"
+      failures=$((failures+1))
+      continue
+    fi
+    if grep -rq "item modify block\|set_custom_model_data\|transformation\|_temp_div\|_temp_trans" "$od/data"; then
+      echo "FAIL: $name still emits the old entity-transformation-matrix/item-modify float math hacks"
+      failures=$((failures+1))
+      continue
+    fi
+  fi
+
+  if [ "$name" = "test_number_provider" ]; then
+    if ! grep -rq "run compute default integer" "$od/data"; then
+      echo "FAIL: $name did not emit a collapsed integer number-provider /compute"
+      failures=$((failures+1))
+      continue
+    fi
+    if ! grep -rq "set compute default float" "$od/data"; then
+      echo "FAIL: $name did not emit a collapsed float number-provider /data modify ... compute"
+      failures=$((failures+1))
+      continue
+    fi
+  fi
+
   if [ "$name" = "test_lambda" ]; then
     if ! find "$od/data" -name '__lambda_*.mcfunction' | grep -q .; then
       echo "FAIL: $name did not emit any synthesized lambda functions"

@@ -2,6 +2,7 @@
 #include "../utils.hpp"
 #include <cmath>
 #include <format>
+#include <unordered_map>
 
 class FloatHandler : public TypeHandler {
 public:
@@ -26,10 +27,7 @@ public:
 
       return Compiler::ExpressionData{
         .data = std::format(
-          "data modify storage {0}:global _temp_trans set value [1f,0f,0f,0f,0f,1f,0f,0f,0f,0f,1f,0f,0f,0f,0f,-1f]\n"
-          "data modify storage {0}:global _temp_trans[3] set from storage {0}:global expr_float{1}\n"
-          "data modify entity 6c6f6f6d-0-0-0-ffff transformation set from storage {0}:global _temp_trans\n"
-          "data modify storage {0}:global expr_float{1} set from entity 6c6f6f6d-0-0-0-ffff transformation.translation[0]",
+          "data modify storage {0}:global expr_float{1} set compute default float {{type:negate,input:{{type:storage,storage:\"{0}:global\",path:\"expr_float{1}\"}}}}",
           compiler.getDatapackNamespace(),
           id
         ),
@@ -89,70 +87,15 @@ public:
     std::string runtimeCommands = leftData + "\n" + rightData + "\n";
 
     if (isMath) {
-      if (op == "+") {
-        runtimeCommands += std::format(
-          "item modify block 18483211 -64 14504281 container.0 "
-          "{{type:set_custom_model_data,floats:{{mode:replace_all,values:[{{type:sum,summands:[{{type:storage,storage:\"{0}:global\",path:\"expr_float{1}\"}},{{type:"
-          "storage,storage:\"{0}:global\",path:\"expr_float{2}\"}}]}}]}}}}\n"
-          "data modify storage {0}:global expr_float{1} set from block 18483211 -64 14504281 Items[0].components.\"minecraft:custom_model_data\".floats[0]",
-          compiler.getDatapackNamespace(),
-          id,
-          id + 1
-        );
-      } else if (op == "-") {
-        compiler.useInternalFunction("internal_float_sub_macro");
-        runtimeCommands += std::format(
-          "data modify storage {0}:global macro_args.a set from storage {0}:global expr_float{1}\n"
-          "data modify storage {0}:global macro_args.b set from storage {0}:global expr_float{2}\n"
-          "item modify block 18483211 -64 14504281 container.0 {{type:set_name,entity:this,name:{{storage:\"{0}:global\",nbt:\"macro_args.b\"}}}}\n"
-          "function {0}:internal/loom/internal_float_sub_macro with block 18483211 -64 14504281 Items[0].components.\"minecraft:custom_name\".extra[0]\n"
-          "data modify storage {0}:global expr_float{1} set from storage {0}:global macro_args.out",
-          compiler.getDatapackNamespace(),
-          id,
-          id + 1
-        );
-      } else if (op == "*") {
-        runtimeCommands += std::format(
-          "item modify block 18483211 -64 14504281 container.0 "
-          "{{type:set_custom_model_data,floats:{{mode:replace_all,values:[{{type:product,operands:[{{type:storage,storage:\"{0}:global\",path:\"expr_float{1}\"}},{{type:"
-          "storage,storage:\"{0}:global\",path:\"expr_float{2}\"}}]}}]}}}}\n"
-          "data modify storage {0}:global expr_float{1} set from block 18483211 -64 14504281 Items[0].components.\"minecraft:custom_model_data\".floats[0]",
-          compiler.getDatapackNamespace(),
-          id,
-          id + 1
-        );
-      } else if (op == "/") {
-        runtimeCommands += std::format(
-          "data modify storage {0}:global _temp_div set value [1f,0f,0f,0f,0f,1f,0f,0f,0f,0f,1f,0f,0f,0f,0f,1f]\n"
-          "data modify storage {0}:global _temp_div[3] set from storage {0}:global expr_float{1}\n"
-          "data modify storage {0}:global _temp_div[15] set from storage {0}:global expr_float{2}\n"
-          "data modify entity 6c6f6f6d-0-0-0-ffff transformation set from storage {0}:global _temp_div\n"
-          "data modify storage {0}:global expr_float{1} set from entity 6c6f6f6d-0-0-0-ffff transformation.translation[0]",
-          compiler.getDatapackNamespace(),
-          id,
-          id + 1
-        );
-      } else if (op == "%") {
-        compiler.useInternalFunction("internal_float_sub_macro");
-        runtimeCommands += std::format(
-          "data modify storage {0}:global _temp_div set value [1f,0f,0f,0f,0f,1f,0f,0f,0f,0f,1f,0f,0f,0f,0f,1f]\n"
-          "data modify storage {0}:global _temp_div[3] set from storage {0}:global expr_float{1}\n"
-          "data modify storage {0}:global _temp_div[15] set from storage {0}:global expr_float{2}\n"
-          "data modify entity 6c6f6f6d-0-0-0-ffff transformation set from storage {0}:global _temp_div\n"
-          "execute store result score internal1 temp run data get entity 6c6f6f6d-0-0-0-ffff transformation.translation[0] 1\n"
-          "item modify block 18483211 -64 14504281 container.0 "
-          "{{type:set_custom_model_data,floats:{{mode:replace_all,values:[{{type:product,operands:[{{type:score,target:{{type:fixed,name:\"internal1\"}},score:\"temp\"}},{{"
-          "type:storage,storage:\"{0}:global\",path:\"expr_float{2}\"}}]}}]}}}}\n"
-          "data modify storage {0}:global macro_args.a set from storage {0}:global expr_float{1}\n"
-          "data modify storage {0}:global macro_args.b set from block 18483211 -64 14504281 Items[0].components.\"minecraft:custom_model_data\".floats[0]\n"
-          "item modify block 18483211 -64 14504281 container.0 {{type:set_name,entity:this,name:{{storage:\"{0}:global\",nbt:\"macro_args.b\"}}}}\n"
-          "function {0}:internal/loom/internal_float_sub_macro with block 18483211 -64 14504281 Items[0].components.\"minecraft:custom_name\".extra[0]\n"
-          "data modify storage {0}:global expr_float{1} set from storage {0}:global macro_args.out",
-          compiler.getDatapackNamespace(),
-          id,
-          id + 1
-        );
-      }
+      static const std::unordered_map<std::string_view, std::string_view> providerType = {
+        {"+", "add"}, {"-", "sub"}, {"*", "mul"}, {"/", "div"}, {"%", "mod"}
+      };
+      const std::string_view type = providerType.at(op);
+      const std::string leftRef = std::format("{{type:storage,storage:\"{0}:global\",path:\"expr_float{1}\"}}", compiler.getDatapackNamespace(), id);
+      const std::string rightRef = std::format("{{type:storage,storage:\"{0}:global\",path:\"expr_float{1}\"}}", compiler.getDatapackNamespace(), id + 1);
+      const std::string provider = (op == "+" || op == "*") ? std::format("{{type:{},inputs:[{},{}]}}", type, leftRef, rightRef)
+                                                              : std::format("{{type:{},left:{},right:{}}}", type, leftRef, rightRef);
+      runtimeCommands += std::format("data modify storage {0}:global expr_float{1} set compute default float {2}", compiler.getDatapackNamespace(), id, provider);
     } else {
       runtimeCommands += std::format(
         "data modify storage {0}:global _temp_cmp set from storage {0}:global expr_float{1}\n"
@@ -174,14 +117,8 @@ public:
         );
       } else {
         runtimeCommands += std::format(
-          "data modify storage {0}:global _temp_trans set value [1f,0f,0f,0f,0f,1f,0f,0f,0f,0f,1f,0f,0f,0f,0f,-1f]\n"
-          "data modify storage {0}:global _temp_trans[3] set from storage {0}:global expr_float{2}\n"
-          "data modify entity 6c6f6f6d-0-0-0-ffff transformation set from storage {0}:global _temp_trans\n"
-          "data modify storage {0}:global _temp_neg set from entity 6c6f6f6d-0-0-0-ffff transformation.translation[0]\n"
-          "item modify block 18483211 -64 14504281 container.0 "
-          "{{type:set_custom_model_data,floats:{{mode:replace_all,values:[{{type:sum,summands:[{{type:storage,storage:\"{0}:global\",path:\"expr_float{1}\"}},{{type:"
-          "storage,storage:\"{0}:global\",path:\"_temp_neg\"}}]}}]}}}}\n"
-          "data modify storage {0}:global _temp_diff set from block 18483211 -64 14504281 Items[0].components.\"minecraft:custom_model_data\".floats[0]\n",
+          "data modify storage {0}:global _temp_diff set compute default float "
+          "{{type:sub,left:{{type:storage,storage:\"{0}:global\",path:\"expr_float{1}\"}},right:{{type:storage,storage:\"{0}:global\",path:\"expr_float{2}\"}}}}\n",
           compiler.getDatapackNamespace(),
           id,
           id + 1
@@ -324,11 +261,8 @@ public:
         }
 
         std::string cmds = expr.data + "\n";
-        c.useInternalFunction("internal_float_abs");
         cmds += std::format(
-          "data modify storage {0}:global macro_args set value {{out_id: {1}}}\n"
-          "data modify storage {0}:global macro_args.value set from storage {0}:global expr_float{1}\n"
-          "function {0}:internal/loom/internal_float_abs with storage {0}:global macro_args",
+          "data modify storage {0}:global expr_float{1} set compute default float {{type:abs,input:{{type:storage,storage:\"{0}:global\",path:\"expr_float{1}\"}}}}",
           c.getDatapackNamespace(),
           id
         );
@@ -359,11 +293,8 @@ public:
         }
 
         std::string cmds = expr.data + "\n";
-        c.useInternalFunction("internal_float_round");
         cmds += std::format(
-          "data modify storage {0}:global macro_args set value {{out_id: {1}}}\n"
-          "data modify storage {0}:global macro_args.value set from storage {0}:global expr_float{1}\n"
-          "function {0}:internal/loom/internal_float_round with storage {0}:global macro_args",
+          "data modify storage {0}:global expr_float{1} set compute default float {{type:round,input:{{type:storage,storage:\"{0}:global\",path:\"expr_float{1}\"}}}}",
           c.getDatapackNamespace(),
           id
         );
@@ -394,11 +325,8 @@ public:
         }
 
         std::string cmds = expr.data + "\n";
-        c.useInternalFunction("internal_float_floor");
         cmds += std::format(
-          "data modify storage {0}:global macro_args set value {{out_id: {1}}}\n"
-          "data modify storage {0}:global macro_args.value set from storage {0}:global expr_float{1}\n"
-          "function {0}:internal/loom/internal_float_floor with storage {0}:global macro_args",
+          "data modify storage {0}:global expr_float{1} set compute default float {{type:floor,input:{{type:storage,storage:\"{0}:global\",path:\"expr_float{1}\"}}}}",
           c.getDatapackNamespace(),
           id
         );
@@ -429,11 +357,8 @@ public:
         }
 
         std::string cmds = expr.data + "\n";
-        c.useInternalFunction("internal_float_ceil");
         cmds += std::format(
-          "data modify storage {0}:global macro_args set value {{out_id: {1}}}\n"
-          "data modify storage {0}:global macro_args.value set from storage {0}:global expr_float{1}\n"
-          "function {0}:internal/loom/internal_float_ceil with storage {0}:global macro_args",
+          "data modify storage {0}:global expr_float{1} set compute default float {{type:ceil,input:{{type:storage,storage:\"{0}:global\",path:\"expr_float{1}\"}}}}",
           c.getDatapackNamespace(),
           id
         );
@@ -464,12 +389,8 @@ public:
         }
 
         std::string cmds = expr.data + "\n";
-        c.useInternalFunction("internal_float_sqrt");
-        c.useInternalFunction("internal_float_sqrt_loop");
         cmds += std::format(
-          "data modify storage {0}:global macro_args set value {{out_id: {1}}}\n"
-          "data modify storage {0}:global macro_args.value set from storage {0}:global expr_float{1}\n"
-          "function {0}:internal/loom/internal_float_sqrt with storage {0}:global macro_args",
+          "data modify storage {0}:global expr_float{1} set compute default float {{type:sqrt,input:{{type:storage,storage:\"{0}:global\",path:\"expr_float{1}\"}}}}",
           c.getDatapackNamespace(),
           id
         );
@@ -498,12 +419,8 @@ public:
         }
 
         std::string cmds = expr.data + "\n";
-        c.useInternalFunction("internal_float_sin");
-        c.useInternalFunction("internal_float_sin_tp");
         cmds += std::format(
-          "data modify storage {0}:global macro_args set value {{out_id: {1}}}\n"
-          "data modify storage {0}:global macro_args.value set from storage {0}:global expr_float{1}\n"
-          "function {0}:internal/loom/internal_float_sin with storage {0}:global macro_args",
+          "data modify storage {0}:global expr_float{1} set compute default float {{type:sin,input:{{type:storage,storage:\"{0}:global\",path:\"expr_float{1}\"}}}}",
           c.getDatapackNamespace(),
           id
         );
@@ -532,12 +449,8 @@ public:
         }
 
         std::string cmds = expr.data + "\n";
-        c.useInternalFunction("internal_float_cos");
-        c.useInternalFunction("internal_float_cos_tp");
         cmds += std::format(
-          "data modify storage {0}:global macro_args set value {{out_id: {1}}}\n"
-          "data modify storage {0}:global macro_args.value set from storage {0}:global expr_float{1}\n"
-          "function {0}:internal/loom/internal_float_cos with storage {0}:global macro_args",
+          "data modify storage {0}:global expr_float{1} set compute default float {{type:cos,input:{{type:storage,storage:\"{0}:global\",path:\"expr_float{1}\"}}}}",
           c.getDatapackNamespace(),
           id
         );
@@ -566,15 +479,10 @@ public:
         }
 
         std::string cmds = expr.data + "\n";
-        c.useInternalFunction("internal_float_tan");
-        c.useInternalFunction("internal_float_cos");
-        c.useInternalFunction("internal_float_cos_tp");
-        c.useInternalFunction("internal_float_sin");
-        c.useInternalFunction("internal_float_sin_tp");
         cmds += std::format(
-          "data modify storage {0}:global macro_args set value {{out_id: {1}}}\n"
-          "data modify storage {0}:global macro_args.value set from storage {0}:global expr_float{1}\n"
-          "function {0}:internal/loom/internal_float_tan with storage {0}:global macro_args",
+          "data modify storage {0}:global expr_float{1} set compute default float "
+          "{{type:div,left:{{type:sin,input:{{type:storage,storage:\"{0}:global\",path:\"expr_float{1}\"}}}},right:{{type:cos,input:{{type:storage,storage:\"{0}:global\","
+          "path:\"expr_float{1}\"}}}}}}",
           c.getDatapackNamespace(),
           id
         );
@@ -606,8 +514,6 @@ public:
         std::string cmds = expr.data + "\n";
         c.useInternalFunction("internal_float_asin");
         c.useInternalFunction("internal_float_atan2");
-        c.useInternalFunction("internal_float_sqrt");
-        c.useInternalFunction("internal_float_sqrt_loop");
         cmds += std::format(
           "data modify storage {0}:global macro_args set value {{out_id: {1}}}\n"
           "data modify storage {0}:global macro_args.value set from storage {0}:global expr_float{1}\n"
@@ -643,8 +549,6 @@ public:
         std::string cmds = expr.data + "\n";
         c.useInternalFunction("internal_float_acos");
         c.useInternalFunction("internal_float_atan2");
-        c.useInternalFunction("internal_float_sqrt");
-        c.useInternalFunction("internal_float_sqrt_loop");
         cmds += std::format(
           "data modify storage {0}:global macro_args set value {{out_id: {1}}}\n"
           "data modify storage {0}:global macro_args.value set from storage {0}:global expr_float{1}\n"

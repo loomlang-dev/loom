@@ -52,8 +52,7 @@ public:
   // UUID: first section is "loom" in ASCII
   std::string globalInit = std::string(setupScoreboards) +
                            "forceload add 18483211 14504281\n"
-                           "execute unless entity 6c6f6f6d-0-0-0-ffff run summon item_display 18483211 0 14504281 {UUID:[I;1819242349,0,0,65535]}\n"
-                           "setblock 18483211 -64 14504281 chest{Items:[{id:stick}]} replace\n";
+                           "execute unless entity 6c6f6f6d-0-0-0-ffff run summon item_display 18483211 0 14504281 {UUID:[I;1819242349,0,0,65535]}\n";
 
 public:
   enum class EnumType { Integer, String, Float };
@@ -365,6 +364,13 @@ private:
   void collectFreeVariableNames(const Block &block, std::unordered_set<std::string> &out);
   void collectFreeVariableNames(const Expr &expr, std::unordered_set<std::string> &out);
   void collectFreeVariableNames(const Stmt &stmt, std::unordered_set<std::string> &out);
+
+  struct NumberProviderResult {
+    std::string json;
+    bool isFloat;
+    bool hasVariable;
+  };
+  std::optional<NumberProviderResult> tryLowerNumberProvider(const Expr &e);
 
   ExpressionData compileMapGet(ExpressionData target, ExpressionData index, unsigned int id, SourceLoc loc);
 

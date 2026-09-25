@@ -1,0 +1,27 @@
+func main() {
+  let a: float = 3.5;
+  let b: float = 2.0;
+  let sum: float = a + b;
+  let diff: float = a - b;
+  let prod: float = a * b;
+  let quot: float = a / b;
+  let rem: float = a % b;
+  let neg: float = -a;
+  let lt: bool = a < b;
+
+  let ab: float = abs(neg);
+  let rd: float = round(a);
+  let fl: float = floor(a);
+  let cl: float = ceil(a);
+  let sq: float = sqrt(a);
+  let sn: float = sin(a);
+  let cs: float = cos(a);
+  let tn: float = tan(a);
+  let half: float = 0.5;
+  let asn: float = asin(half);
+  let acs: float = acos(half);
+  let atn: float = atan(a);
+  let atn2: float = atan2(a, b);
+
+  say ${sum} ${diff} ${prod} ${quot} ${rem} ${neg} ${lt} ${ab} ${rd} ${fl} ${cl} ${sq} ${sn} ${cs} ${tn} ${asn} ${acs} ${atn} ${atn2};
+}

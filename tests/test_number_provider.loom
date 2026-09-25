@@ -1,0 +1,25 @@
+enum Color {
+  Red = 0,
+  Green = 1,
+  Blue = 2
+}
+
+func main() {
+  let a: int = 5;
+  let b: int = a;
+  let c: int = a + b * 2 - 1;
+
+  let x: float = 2.5;
+  let y: float = x * a + 1.0;
+
+  let neg: int = -c;
+
+  b = a;
+  b = c + 1;
+
+  let col1: Color = Color.Red;
+  let col2: Color = col1;
+  col2 = col1;
+
+  say ${b} ${c} ${y} ${neg};
+}

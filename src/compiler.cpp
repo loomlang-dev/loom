@@ -209,7 +209,36 @@ std::string Compiler::compileVariableDeclaration(const VarDeclStmt &decl, Source
   if (decl.typeText.has_value()) declaredType = parseTypeFromString(*decl.typeText);
 
   const LambdaExpr *lambdaInit = std::get_if<LambdaExpr>(&decl.value->data);
-  const ExpressionData expr = (lambdaInit && declaredType.has_value()) ? compileLambdaExpr(*lambdaInit, declaredType, 1, decl.value->loc) : compileExpression(*decl.value);
+
+  bool directNumberProvider = false;
+  std::string directProviderJson;
+  bool directProviderIsFloat = false;
+  bool directBareCopy = false;
+  std::optional<VariableData> bareCopySource;
+  if (!lambdaInit && !decl.isEntityLocal && declaredType.has_value() && (declaredType->isInteger() || declaredType->isBoolean() || declaredType->isFloat())) {
+    if (auto *vr = std::get_if<VarRefExpr>(&decl.value->data)) {
+      auto srcIt = findInMap(vars, vr->name);
+      bool typesCompatible = false;
+      if (srcIt != vars.end() && !srcIt->second.isEntityLocal && !srcIt->second.type.isRef() && !srcIt->second.value.has_value()) {
+        typesCompatible = declaredType->kind == Type::Enum ? srcIt->second.type == *declaredType : srcIt->second.type.isFloat() == declaredType->isFloat();
+      }
+      if (typesCompatible) {
+        directBareCopy = true;
+        bareCopySource = srcIt->second;
+      }
+    }
+    if (!directBareCopy && declaredType->kind != Type::Enum) {
+      if (auto lowered = tryLowerNumberProvider(*decl.value); lowered.has_value() && lowered->hasVariable && lowered->isFloat == declaredType->isFloat()) {
+        directNumberProvider = true;
+        directProviderJson = lowered->json;
+        directProviderIsFloat = lowered->isFloat;
+      }
+    }
+  }
+
+  const ExpressionData expr = (directNumberProvider || directBareCopy)   ? ExpressionData{.data = "", .precomputed = false, .type = *declaredType}
+                              : (lambdaInit && declaredType.has_value()) ? compileLambdaExpr(*lambdaInit, declaredType, 1, decl.value->loc)
+                                                                         : compileExpression(*decl.value);
 
   const bool constant = decl.isConst;
   std::optional<std::string> value = std::nullopt;
@@ -283,6 +312,30 @@ std::string Compiler::compileVariableDeclaration(const VarDeclStmt &decl, Source
       ret += std::format("data modify storage {}:global vars.{} set value {{}}\n", datapackNamespace, mangled);
     } else {
       ret += std::format("scoreboard objectives add {} dummy\n", mangled);
+    }
+    return ret;
+  }
+
+  if (directBareCopy) {
+    if (bareCopySource->type.isFloat()) {
+      ret += std::format(
+        "data modify storage {0}:global vars.{1} set from storage {2}:global vars.{3}\n",
+        datapackNamespace,
+        mangled,
+        bareCopySource->emitNamespace,
+        bareCopySource->getStorageName()
+      );
+    } else {
+      ret += std::format("scoreboard players operation {} vars = {} vars\n", mangled, bareCopySource->getStorageName());
+    }
+    return ret;
+  }
+
+  if (directNumberProvider) {
+    if (directProviderIsFloat) {
+      ret += std::format("data modify storage {}:global vars.{} set compute default float {}\n", datapackNamespace, mangled, directProviderJson);
+    } else {
+      ret += std::format("execute store result score {} vars run compute default integer {}\n", mangled, directProviderJson);
     }
     return ret;
   }
@@ -478,15 +531,6 @@ std::vector<Compiler::CompiledFunction> Compiler::compile() {
      .data = std::format("$execute store result storage {0}:global vars.$(var_name)$(path) int 1 run scoreboard players get expr_output1 temp", datapackNamespace)}
   );
   internalFunctions.push_back(
-    {.name = "internal_float_sub_macro",
-     .data = "$item modify block 18483211 -64 14504281 container.0 {type:set_custom_model_data,floats:{mode:replace_all,values:[{type:sum,summands:[{type:storage,storage:\"" +
-             datapackNamespace +
-             ":global\",path:\"macro_args.a\"},{type:score,target:{type:fixed,name:\"invert\"},score:\"temp\",scale:$(text)}]}]}}\n"
-             "data modify storage " +
-             datapackNamespace + ":global macro_args.out set from block 18483211 -64 14504281 Items[0].components.\"minecraft:custom_model_data\".floats[0]"}
-  );
-
-  internalFunctions.push_back(
     {.name = "internal_int_to_string", .data = std::format("$data modify storage {0}:global expr_str$(out_id) set value \"$(value)\"", datapackNamespace)}
   );
   internalFunctions.push_back(
@@ -528,140 +572,7 @@ std::vector<Compiler::CompiledFunction> Compiler::compile() {
        datapackNamespace
      )}
   );
-  internalFunctions.push_back(
-    {.name = "internal_float_abs",
-     .data = std::format(
-       "$data modify storage {0}:global _temp_char set string storage {0}:global macro_args.value 0 1\n"
-       "$execute if data storage {0}:global {{_temp_char:\"-\"}} run data modify storage {0}:global macro_args.value set string storage {0}:global macro_args.value 1\n"
-       "$data modify storage {0}:global expr_float$(out_id) set from storage {0}:global macro_args.value",
-       datapackNamespace
-     )}
-  );
-  internalFunctions.push_back(
-    {.name = "internal_float_floor",
-     .data = std::format(
-       "$execute store result score _temp temp run data get storage {0}:global macro_args.value 1\n"
-       "$execute store result storage {0}:global expr_float$(out_id) float 1 run scoreboard players get _temp temp",
-       datapackNamespace
-     )}
-  );
-  internalFunctions.push_back(
-    {.name = "internal_float_ceil",
-     .data = std::format(
-       "$execute store result score _temp temp run data get storage {0}:global macro_args.value 1\n"
-       "$execute store result storage {0}:global expr_float$(out_id) float 1 run scoreboard players get _temp temp",
-       datapackNamespace
-     )}
-  );
-  internalFunctions.push_back(
-    {.name = "internal_float_round",
-     .data = std::format(
-       "$execute store result score _temp temp run data get storage {0}:global macro_args.value 1\n"
-       "$execute store result storage {0}:global expr_float$(out_id) float 1 run scoreboard players get _temp temp",
-       datapackNamespace
-     )}
-  );
-  internalFunctions.push_back(
-    {.name = "internal_float_sqrt",
-     .data = std::format(
-       "data modify storage {0}:global _sqrt_S set from storage {0}:global macro_args.value\n"
-       "data modify storage {0}:global _sqrt_x set value 1.0f\n"
-       "data modify storage {0}:global _sqrt_iters set value 0\n"
-       "function {0}:internal/loom/internal_float_sqrt_loop\n"
-       "$data modify storage {0}:global expr_float$(out_id) set from storage {0}:global _sqrt_x",
-       datapackNamespace
-     )}
-  );
-  internalFunctions.push_back(
-    {.name = "internal_float_sqrt_loop",
-     .data = std::format(
-       "data modify storage {0}:global _temp_div set value [1f,0f,0f,0f,0f,1f,0f,0f,0f,0f,1f,0f,0f,0f,0f,1f]\n"
-       "data modify storage {0}:global _temp_div[3] set from storage {0}:global _sqrt_S\n"
-       "data modify storage {0}:global _temp_div[15] set from storage {0}:global _sqrt_x\n"
-       "data modify entity 6c6f6f6d-0-0-0-ffff transformation set from storage {0}:global _temp_div\n"
-       "data modify storage {0}:global _sqrt_div_res set from entity 6c6f6f6d-0-0-0-ffff transformation.translation[0]\n"
 
-       "item modify block 18483211 -64 14504281 container.0 "
-       "{{type:set_custom_model_data,floats:{{mode:replace_all,values:[{{type:sum,summands:[{{type:storage,storage:\"{0}:global\",path:\"_sqrt_div_res\"}},{{type:storage,"
-       "storage:\"{0}:global\",path:\"_sqrt_x\"}}]}}]}}}}\n"
-       "data modify storage {0}:global _sqrt_add_res set from block 18483211 -64 14504281 Items[0].components.\"minecraft:custom_model_data\".floats[0]\n"
-
-       "item modify block 18483211 -64 14504281 container.0 "
-       "{{type:set_custom_model_data,floats:{{mode:replace_all,values:[{{type:product,operands:[{{type:storage,storage:\"{0}:global\",path:\"_sqrt_add_res\"}},{{type:"
-       "constant,value:0.5}}]}}]}}}}\n"
-       "data modify storage {0}:global _sqrt_x set from block 18483211 -64 14504281 Items[0].components.\"minecraft:custom_model_data\".floats[0]\n"
-
-       "execute store result score _iters temp run data get storage {0}:global _sqrt_iters\n"
-       "scoreboard players add _iters temp 1\n"
-       "execute store result storage {0}:global _sqrt_iters int 1 run scoreboard players get _iters temp\n"
-       "execute if score _iters temp < 5 run function {0}:internal/loom/internal_float_sqrt_loop",
-       datapackNamespace
-     )}
-  );
-  internalFunctions.push_back(
-    {.name = "internal_float_sin",
-     .data = std::format(
-       "item modify block 18483211 -64 14504281 container.0 "
-       "{{type:set_custom_model_data,floats:{{mode:replace_all,values:[{{type:product,operands:[{{type:storage,storage:\"{0}:global\",path:\"macro_args.value\"}},{{type:"
-       "constant,value:57.29578}}]}}]}}}}\n"
-       "data modify storage {0}:global macro_args.yaw set from block 18483211 -64 14504281 Items[0].components.\"minecraft:custom_model_data\".floats[0]\n"
-       "function {0}:internal/loom/internal_float_sin_tp with storage {0}:global macro_args",
-       datapackNamespace
-     )}
-  );
-  internalFunctions.push_back(
-    {.name = "internal_float_sin_tp",
-     .data = std::format(
-       "$teleport 6c6f6f6d-0-0-0-ffff 0.0 0.0 0.0 $(yaw) 0\n"
-       "execute as 6c6f6f6d-0-0-0-ffff at @s run teleport @s ^ ^ ^1\n"
-       "data modify storage {0}:global _temp_trans set value [1f,0f,0f,0f,0f,1f,0f,0f,0f,0f,1f,0f,0f,0f,0f,-1f]\n"
-       "data modify storage {0}:global _temp_trans[3] set from entity 6c6f6f6d-0-0-0-ffff Pos[0]\n"
-       "data modify entity 6c6f6f6d-0-0-0-ffff transformation set from storage {0}:global _temp_trans\n"
-       "$data modify storage {0}:global expr_float$(out_id) set from entity 6c6f6f6d-0-0-0-ffff transformation.translation[0]",
-       datapackNamespace
-     )}
-  );
-  internalFunctions.push_back(
-    {.name = "internal_float_cos",
-     .data = std::format(
-       "item modify block 18483211 -64 14504281 container.0 "
-       "{{type:set_custom_model_data,floats:{{mode:replace_all,values:[{{type:product,operands:[{{type:storage,storage:\"{0}:global\",path:\"macro_args.value\"}},{{type:"
-       "constant,value:57.29578}}]}}]}}}}\n"
-       "data modify storage {0}:global macro_args.yaw set from block 18483211 -64 14504281 Items[0].components.\"minecraft:custom_model_data\".floats[0]\n"
-       "function {0}:internal/loom/internal_float_cos_tp with storage {0}:global macro_args",
-       datapackNamespace
-     )}
-  );
-  internalFunctions.push_back(
-    {.name = "internal_float_cos_tp",
-     .data = std::format(
-       "$teleport 6c6f6f6d-0-0-0-ffff 0.0 0.0 0.0 $(yaw) 0\n"
-       "execute as 6c6f6f6d-0-0-0-ffff at @s run teleport @s ^ ^ ^1\n"
-       "$data modify storage {0}:global expr_float$(out_id) set from entity 6c6f6f6d-0-0-0-ffff Pos[2]",
-       datapackNamespace
-     )}
-  );
-  internalFunctions.push_back(
-    {.name = "internal_float_tan",
-     .data = std::format(
-       "data modify storage {0}:global _tan_val set from storage {0}:global macro_args.value\n"
-       "data modify storage {0}:global macro_args set value {{out_id: 9991}}\n"
-       "data modify storage {0}:global macro_args.value set from storage {0}:global _tan_val\n"
-       "function {0}:internal/loom/internal_float_sin with storage {0}:global macro_args\n"
-       "data modify storage {0}:global _tan_sin set from storage {0}:global expr_float9991\n"
-       "data modify storage {0}:global macro_args set value {{out_id: 9992}}\n"
-       "data modify storage {0}:global macro_args.value set from storage {0}:global _tan_val\n"
-       "function {0}:internal/loom/internal_float_cos with storage {0}:global macro_args\n"
-       "data modify storage {0}:global _tan_cos set from storage {0}:global expr_float9992\n"
-
-       "data modify storage {0}:global _temp_div set value [1f,0f,0f,0f,0f,1f,0f,0f,0f,0f,1f,0f,0f,0f,0f,1f]\n"
-       "data modify storage {0}:global _temp_div[3] set from storage {0}:global _tan_sin\n"
-       "data modify storage {0}:global _temp_div[15] set from storage {0}:global _tan_cos\n"
-       "data modify entity 6c6f6f6d-0-0-0-ffff transformation set from storage {0}:global _temp_div\n"
-       "$data modify storage {0}:global expr_float$(out_id) set from entity 6c6f6f6d-0-0-0-ffff transformation.translation[0]",
-       datapackNamespace
-     )}
-  );
   internalFunctions.push_back(
     {.name = "internal_float_atan2",
      .data = std::format(
@@ -671,11 +582,8 @@ std::vector<Compiler::CompiledFunction> Compiler::compile() {
        "teleport 6c6f6f6d-0-0-0-ffff 0.0 0.0 0.0\n"
        "execute as 6c6f6f6d-0-0-0-ffff at @s facing entity 6c6f6f6d-0-0-0-aaaa run teleport @s ~ ~ ~ ~ ~\n"
        "data modify storage {0}:global _temp_degrees set from entity 6c6f6f6d-0-0-0-ffff Rotation[0]\n"
-
-       "item modify block 18483211 -64 14504281 container.0 "
-       "{{type:set_custom_model_data,floats:{{mode:replace_all,values:[{{type:product,operands:[{{type:storage,storage:\"{0}:global\",path:\"_temp_degrees\"}},{{type:"
-       "constant,value:0.0174533}}]}}]}}}}\n"
-       "$data modify storage {0}:global expr_float$(out_id) set from block 18483211 -64 14504281 Items[0].components.\"minecraft:custom_model_data\".floats[0]",
+       "$data modify storage {0}:global expr_float$(out_id) set compute default float "
+       "{{type:mul,inputs:[{{type:storage,storage:\"{0}:global\",path:\"_temp_degrees\"}},{{type:constant,value:0.0174533}}]}}",
        datapackNamespace
      )}
   );
@@ -692,33 +600,12 @@ std::vector<Compiler::CompiledFunction> Compiler::compile() {
     {.name = "internal_float_asin",
      .data = std::format(
        "data modify storage {0}:global _asin_val set from storage {0}:global macro_args.value\n"
-
-       "data modify storage {0}:global _temp_mul set value [1f,0f,0f,1f,0f,1f,0f,0f,0f,0f,1f,0f,0f,0f,0f,1f]\n"
-       "data modify storage {0}:global _temp_mul[15] set from storage {0}:global _asin_val\n"
-       "data modify entity 6c6f6f6d-0-0-0-ffff transformation set from storage {0}:global _temp_mul\n"
-       "data modify storage {0}:global _temp_var1 set value [1f,0f,0f,0f,0f,1f,0f,0f,0f,0f,1f,0f,0f,0f,0f,1f]\n"
-       "data modify storage {0}:global _temp_var1[3] set from storage {0}:global _asin_val\n"
-       "data modify storage {0}:global _temp_var1[15] set from entity 6c6f6f6d-0-0-0-ffff transformation.translation[0]\n"
-       "data modify entity 6c6f6f6d-0-0-0-ffff transformation set from storage {0}:global _temp_var1\n"
-       "data modify storage {0}:global _asin_sq set from entity 6c6f6f6d-0-0-0-ffff transformation.translation[0]\n"
-
-       "data modify storage {0}:global _temp_trans set value [1f,0f,0f,0f,0f,1f,0f,0f,0f,0f,1f,0f,0f,0f,0f,-1f]\n"
-       "data modify storage {0}:global _temp_trans[3] set from storage {0}:global _asin_sq\n"
-       "data modify entity 6c6f6f6d-0-0-0-ffff transformation set from storage {0}:global _temp_trans\n"
-       "data modify storage {0}:global _asin_neg_sq set from entity 6c6f6f6d-0-0-0-ffff transformation.translation[0]\n"
-       "data modify storage {0}:global _asin_one set value 1.0f\n"
-       "item modify block 18483211 -64 14504281 container.0 "
-       "{{type:set_custom_model_data,floats:{{mode:replace_all,values:[{{type:sum,summands:[{{type:storage,storage:\"{0}:global\",path:\"_asin_one\"}},{{type:storage,"
-       "storage:\"{0}:global\",path:\"_asin_neg_sq\"}}]}}]}}}}\n"
-       "data modify storage {0}:global _asin_sub set from block 18483211 -64 14504281 Items[0].components.\"minecraft:custom_model_data\".floats[0]\n"
-
-       "data modify storage {0}:global macro_args set value {{out_id: 9993}}\n"
-       "data modify storage {0}:global macro_args.value set from storage {0}:global _asin_sub\n"
-       "function {0}:internal/loom/internal_float_sqrt with storage {0}:global macro_args\n"
-
+       "data modify storage {0}:global _asin_sqrt_res set compute default float "
+       "{{type:sqrt,input:{{type:sub,left:{{type:constant,value:1.0}},right:{{type:mul,inputs:[{{type:storage,storage:\"{0}:global\",path:\"_asin_val\"}},{{type:storage,"
+       "storage:\"{0}:global\",path:\"_asin_val\"}}]}}}}}}\n"
        "$data modify storage {0}:global macro_args set value {{out_id: $(out_id)}}\n"
        "data modify storage {0}:global macro_args.y set from storage {0}:global _asin_val\n"
-       "data modify storage {0}:global macro_args.x set from storage {0}:global expr_float9993\n"
+       "data modify storage {0}:global macro_args.x set from storage {0}:global _asin_sqrt_res\n"
        "function {0}:internal/loom/internal_float_atan2 with storage {0}:global macro_args",
        datapackNamespace
      )}
@@ -727,32 +614,11 @@ std::vector<Compiler::CompiledFunction> Compiler::compile() {
     {.name = "internal_float_acos",
      .data = std::format(
        "data modify storage {0}:global _acos_val set from storage {0}:global macro_args.value\n"
-
-       "data modify storage {0}:global _temp_mul set value [1f,0f,0f,1f,0f,1f,0f,0f,0f,0f,1f,0f,0f,0f,0f,1f]\n"
-       "data modify storage {0}:global _temp_mul[15] set from storage {0}:global _acos_val\n"
-       "data modify entity 6c6f6f6d-0-0-0-ffff transformation set from storage {0}:global _temp_mul\n"
-       "data modify storage {0}:global _temp_var1 set value [1f,0f,0f,0f,0f,1f,0f,0f,0f,0f,1f,0f,0f,0f,0f,1f]\n"
-       "data modify storage {0}:global _temp_var1[3] set from storage {0}:global _acos_val\n"
-       "data modify storage {0}:global _temp_var1[15] set from entity 6c6f6f6d-0-0-0-ffff transformation.translation[0]\n"
-       "data modify entity 6c6f6f6d-0-0-0-ffff transformation set from storage {0}:global _temp_var1\n"
-       "data modify storage {0}:global _acos_sq set from entity 6c6f6f6d-0-0-0-ffff transformation.translation[0]\n"
-
-       "data modify storage {0}:global _temp_trans set value [1f,0f,0f,0f,0f,1f,0f,0f,0f,0f,1f,0f,0f,0f,0f,-1f]\n"
-       "data modify storage {0}:global _temp_trans[3] set from storage {0}:global _acos_sq\n"
-       "data modify entity 6c6f6f6d-0-0-0-ffff transformation set from storage {0}:global _temp_trans\n"
-       "data modify storage {0}:global _acos_neg_sq set from entity 6c6f6f6d-0-0-0-ffff transformation.translation[0]\n"
-       "data modify storage {0}:global _acos_one set value 1.0f\n"
-       "item modify block 18483211 -64 14504281 container.0 "
-       "{{type:set_custom_model_data,floats:{{mode:replace_all,values:[{{type:sum,summands:[{{type:storage,storage:\"{0}:global\",path:\"_acos_one\"}},{{type:storage,"
-       "storage:\"{0}:global\",path:\"_acos_neg_sq\"}}]}}]}}}}\n"
-       "data modify storage {0}:global _acos_sub set from block 18483211 -64 14504281 Items[0].components.\"minecraft:custom_model_data\".floats[0]\n"
-
-       "data modify storage {0}:global macro_args set value {{out_id: 9994}}\n"
-       "data modify storage {0}:global macro_args.value set from storage {0}:global _acos_sub\n"
-       "function {0}:internal/loom/internal_float_sqrt with storage {0}:global macro_args\n"
-
+       "data modify storage {0}:global _acos_sqrt_res set compute default float "
+       "{{type:sqrt,input:{{type:sub,left:{{type:constant,value:1.0}},right:{{type:mul,inputs:[{{type:storage,storage:\"{0}:global\",path:\"_acos_val\"}},{{type:storage,"
+       "storage:\"{0}:global\",path:\"_acos_val\"}}]}}}}}}\n"
        "$data modify storage {0}:global macro_args set value {{out_id: $(out_id)}}\n"
-       "data modify storage {0}:global macro_args.y set from storage {0}:global expr_float9994\n"
+       "data modify storage {0}:global macro_args.y set from storage {0}:global _acos_sqrt_res\n"
        "data modify storage {0}:global macro_args.x set from storage {0}:global _acos_val\n"
        "function {0}:internal/loom/internal_float_atan2 with storage {0}:global macro_args",
        datapackNamespace

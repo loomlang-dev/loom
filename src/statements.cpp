@@ -436,6 +436,48 @@ std::string Compiler::compileBlock(const Block &block) {
           }
 
           const LambdaExpr *lambdaAssign = std::get_if<LambdaExpr>(&expNode.data);
+
+          if (!lambdaAssign) {
+            const Type &lowerTargetType = varData.type.isRef() ? *varData.type.baseType : varData.type;
+            if (lowerTargetType.isInteger() || lowerTargetType.isBoolean() || lowerTargetType.isFloat()) {
+              if (auto *vr = std::get_if<VarRefExpr>(&expNode.data)) {
+                auto srcIt = findInMap(vars, vr->name);
+                bool typesCompatible = false;
+                if (srcIt != vars.end() && !srcIt->second.isEntityLocal && !srcIt->second.type.isRef() && !srcIt->second.value.has_value()) {
+                  typesCompatible =
+                    lowerTargetType.kind == Compiler::Type::Enum ? srcIt->second.type == lowerTargetType : srcIt->second.type.isFloat() == lowerTargetType.isFloat();
+                }
+                if (typesCompatible) {
+                  const auto &src = srcIt->second;
+                  if (src.type.isFloat()) {
+                    ret += std::format(
+                      "data modify storage {0}:global vars.{1} set from storage {2}:global vars.{3}\n",
+                      varData.emitNamespace,
+                      varData.getStorageName(),
+                      src.emitNamespace,
+                      src.getStorageName()
+                    );
+                  } else {
+                    ret += std::format("scoreboard players operation {} vars = {} vars\n", varData.getStorageName(), src.getStorageName());
+                  }
+                  return;
+                }
+              }
+
+              if (lowerTargetType.kind != Compiler::Type::Enum) {
+                if (auto lowered = tryLowerNumberProvider(expNode); lowered.has_value() && lowered->hasVariable && lowered->isFloat == lowerTargetType.isFloat()) {
+                  if (lowered->isFloat) {
+                    ret +=
+                      std::format("data modify storage {0}:global vars.{1} set compute default float {2}\n", varData.emitNamespace, varData.getStorageName(), lowered->json);
+                  } else {
+                    ret += std::format("execute store result score {} vars run compute default integer {}\n", varData.getStorageName(), lowered->json);
+                  }
+                  return;
+                }
+              }
+            }
+          }
+
           const ExpressionData expr =
             (lambdaAssign && varData.type.isFunction()) ? compileLambdaExpr(*lambdaAssign, varData.type, 1, expNode.loc) : compileExpression(expNode);
 

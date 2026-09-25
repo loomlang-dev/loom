@@ -739,6 +739,90 @@ Compiler::ExpressionData Compiler::compileMapGet(ExpressionData target, Expressi
   return {.data = cmds, .precomputed = false, .type = resultType};
 }
 
+namespace {
+std::string ensureFloatLiteral(std::string v) {
+  if (v.find('.') == std::string::npos) v += ".0";
+  return v;
+}
+} // namespace
+
+std::optional<Compiler::NumberProviderResult> Compiler::tryLowerNumberProvider(const Expr &e) {
+  return std::visit(
+    [&](auto &&n) -> std::optional<NumberProviderResult> {
+      using T = std::decay_t<decltype(n)>;
+
+      if constexpr (std::is_same_v<T, IntLit>) {
+        return NumberProviderResult{.json = std::format("{{type:constant,value:{}}}", n.text), .isFloat = false, .hasVariable = false};
+      }
+
+      else if constexpr (std::is_same_v<T, FloatLit>) {
+        return NumberProviderResult{.json = std::format("{{type:constant,value:{}}}", ensureFloatLiteral(n.text)), .isFloat = true, .hasVariable = false};
+      }
+
+      else if constexpr (std::is_same_v<T, VarRefExpr>) {
+        auto it = findInMap(vars, n.name);
+        if (it == vars.end()) return std::nullopt;
+        const VariableData &vd = it->second;
+        if (vd.isEntityLocal || vd.type.isRef()) return std::nullopt;
+
+        if (vd.value.has_value()) {
+          if (vd.type.isFloat()) {
+            return NumberProviderResult{.json = std::format("{{type:constant,value:{}}}", ensureFloatLiteral(vd.value.value())), .isFloat = true, .hasVariable = false};
+          }
+          if (vd.type.isInteger() || vd.type.isBoolean()) {
+            return NumberProviderResult{.json = std::format("{{type:constant,value:{}}}", vd.value.value()), .isFloat = false, .hasVariable = false};
+          }
+          return std::nullopt;
+        }
+
+        if (vd.type.isInteger() || vd.type.isBoolean()) {
+          std::string json = std::format("{{type:score,target:{{type:fixed,name:\"{}\"}},score:\"vars\"}}", vd.getStorageName());
+          return NumberProviderResult{.json = json, .isFloat = false, .hasVariable = true};
+        }
+        if (vd.type.isFloat()) {
+          std::string json = std::format("{{type:storage,storage:\"{}:global\",path:\"vars.{}\"}}", vd.emitNamespace, vd.getStorageName());
+          return NumberProviderResult{.json = json, .isFloat = true, .hasVariable = true};
+        }
+        return std::nullopt;
+      }
+
+      else if constexpr (std::is_same_v<T, UnaryExpr>) {
+        if (n.op != "-") return std::nullopt;
+        auto operand = tryLowerNumberProvider(*n.operand);
+        if (!operand.has_value()) return std::nullopt;
+        return NumberProviderResult{.json = std::format("{{type:negate,input:{}}}", operand->json), .isFloat = operand->isFloat, .hasVariable = operand->hasVariable};
+      }
+
+      else if constexpr (std::is_same_v<T, BinaryExpr>) {
+        if (n.op != "+" && n.op != "-" && n.op != "*" && n.op != "/" && n.op != "%") return std::nullopt;
+
+        auto left = tryLowerNumberProvider(*n.left);
+        if (!left.has_value()) return std::nullopt;
+        auto right = tryLowerNumberProvider(*n.right);
+        if (!right.has_value()) return std::nullopt;
+
+        const bool resultIsFloat = left->isFloat || right->isFloat;
+        std::string leftJson = left->isFloat || !resultIsFloat ? left->json : std::format("{{type:from_int,input:{}}}", left->json);
+        std::string rightJson = right->isFloat || !resultIsFloat ? right->json : std::format("{{type:from_int,input:{}}}", right->json);
+
+        std::string json;
+        if (n.op == "+") json = std::format("{{type:add,inputs:[{},{}]}}", leftJson, rightJson);
+        else if (n.op == "*") json = std::format("{{type:mul,inputs:[{},{}]}}", leftJson, rightJson);
+        else if (n.op == "-") json = std::format("{{type:sub,left:{},right:{}}}", leftJson, rightJson);
+        else if (n.op == "/") json = std::format("{{type:div,left:{},right:{}}}", leftJson, rightJson);
+        else json = std::format("{{type:mod,left:{},right:{}}}", leftJson, rightJson);
+
+        return NumberProviderResult{.json = std::move(json), .isFloat = resultIsFloat, .hasVariable = left->hasVariable || right->hasVariable};
+      }
+
+      else {
+        return std::nullopt;
+      }
+    },
+    e.data
+  );
+}
+
 Compiler::ExpressionData Compiler::compileExpressionImpl(const Expr &node, unsigned int id, bool precompute) {
   return std::visit(
     [&](auto &&n) -> ExpressionData {
@@ -1033,6 +1117,21 @@ Compiler::ExpressionData Compiler::compileExpressionImpl(const Expr &node, unsig
       }
 
       else if constexpr (std::is_same_v<T, UnaryExpr>) {
+        if (auto lowered = tryLowerNumberProvider(node); lowered.has_value() && lowered->hasVariable) {
+          if (lowered->isFloat) {
+            return {
+              .data = std::format("data modify storage {}:global expr_float{} set compute default float {}", datapackNamespace, id, lowered->json),
+              .precomputed = false,
+              .type = Type::FloatType()
+            };
+          }
+          return {
+            .data = std::format("execute store result score expr_output{} temp run compute default integer {}", id, lowered->json),
+            .precomputed = false,
+            .type = Type::IntegerType()
+          };
+        }
+
         const ExpressionData subExpr = compileExpression(*n.operand, id, true);
 
         if (auto *innerUnary = std::get_if<UnaryExpr>(&n.operand->data)) {
@@ -1483,6 +1582,21 @@ Compiler::ExpressionData Compiler::compileExpressionImpl(const Expr &node, unsig
       }
 
       else if constexpr (std::is_same_v<T, BinaryExpr>) {
+        if (auto lowered = tryLowerNumberProvider(node); lowered.has_value() && lowered->hasVariable) {
+          if (lowered->isFloat) {
+            return {
+              .data = std::format("data modify storage {}:global expr_float{} set compute default float {}", datapackNamespace, id, lowered->json),
+              .precomputed = false,
+              .type = Type::FloatType()
+            };
+          }
+          return {
+            .data = std::format("execute store result score expr_output{} temp run compute default integer {}", id, lowered->json),
+            .precomputed = false,
+            .type = Type::IntegerType()
+          };
+        }
+
         ExpressionData left = compileExpression(*n.left, id, true);
         ExpressionData right = compileExpression(*n.right, id + 1, true);
 
