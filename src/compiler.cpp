@@ -211,6 +211,7 @@ std::string Compiler::compileVariableDeclaration(const VarDeclStmt &decl, Source
   if (decl.typeText.has_value()) declaredType = parseTypeFromString(*decl.typeText);
 
   const LambdaExpr *lambdaInit = std::get_if<LambdaExpr>(&decl.value->data);
+  const DataGetExpr *dataGetInit = std::get_if<DataGetExpr>(&decl.value->data);
 
   bool directNumberProvider = false;
   std::string directProviderJson;
@@ -238,9 +239,10 @@ std::string Compiler::compileVariableDeclaration(const VarDeclStmt &decl, Source
     }
   }
 
-  const ExpressionData expr = (directNumberProvider || directBareCopy)   ? ExpressionData{.data = "", .precomputed = false, .type = *declaredType}
-                              : (lambdaInit && declaredType.has_value()) ? compileLambdaExpr(*lambdaInit, declaredType, 1, decl.value->loc)
-                                                                         : compileExpression(*decl.value);
+  const ExpressionData expr = (directNumberProvider || directBareCopy)    ? ExpressionData{.data = "", .precomputed = false, .type = *declaredType}
+                              : (lambdaInit && declaredType.has_value())  ? compileLambdaExpr(*lambdaInit, declaredType, 1, decl.value->loc)
+                              : (dataGetInit && declaredType.has_value()) ? compileDataGetExpr(*dataGetInit, declaredType, 1, decl.value->loc)
+                                                                          : compileExpression(*decl.value);
 
   const bool constant = decl.isConst;
   std::optional<std::string> value = std::nullopt;

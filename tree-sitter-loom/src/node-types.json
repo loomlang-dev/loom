@@ -30,6 +30,10 @@
             "named": true
           },
           {
+            "type": "data_get_expression",
+            "named": true
+          },
+          {
             "type": "element_expression",
             "named": true
           },
@@ -133,6 +137,10 @@
           },
           {
             "type": "cast_expression",
+            "named": true
+          },
+          {
+            "type": "data_get_expression",
             "named": true
           },
           {
@@ -288,6 +296,10 @@
             "named": true
           },
           {
+            "type": "data_get_expression",
+            "named": true
+          },
+          {
             "type": "element_expression",
             "named": true
           },
@@ -384,6 +396,10 @@
           "named": true
         },
         {
+          "type": "data_set_statement",
+          "named": true
+        },
+        {
           "type": "do_while",
           "named": true
         },
@@ -461,6 +477,10 @@
           },
           {
             "type": "cast_expression",
+            "named": true
+          },
+          {
+            "type": "data_get_expression",
             "named": true
           },
           {
@@ -747,6 +767,164 @@
     }
   },
   {
+    "type": "data_get_expression",
+    "named": true,
+    "fields": {
+      "path": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "nbt_path",
+            "named": true
+          }
+        ]
+      },
+      "target": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "resource_location",
+            "named": true
+          },
+          {
+            "type": "selector",
+            "named": true
+          },
+          {
+            "type": "vec3",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "data_set_statement",
+    "named": true,
+    "fields": {
+      "path": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "nbt_path",
+            "named": true
+          }
+        ]
+      },
+      "target": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "resource_location",
+            "named": true
+          },
+          {
+            "type": "selector",
+            "named": true
+          },
+          {
+            "type": "vec3",
+            "named": true
+          }
+        ]
+      },
+      "value": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "binary_expression",
+            "named": true
+          },
+          {
+            "type": "boolean",
+            "named": true
+          },
+          {
+            "type": "cast_expression",
+            "named": true
+          },
+          {
+            "type": "data_get_expression",
+            "named": true
+          },
+          {
+            "type": "element_expression",
+            "named": true
+          },
+          {
+            "type": "float",
+            "named": true
+          },
+          {
+            "type": "function_call",
+            "named": true
+          },
+          {
+            "type": "integer",
+            "named": true
+          },
+          {
+            "type": "lambda_expression",
+            "named": true
+          },
+          {
+            "type": "list_expression",
+            "named": true
+          },
+          {
+            "type": "map_expression",
+            "named": true
+          },
+          {
+            "type": "member_expression",
+            "named": true
+          },
+          {
+            "type": "method_call_expression",
+            "named": true
+          },
+          {
+            "type": "parenthesized_expression",
+            "named": true
+          },
+          {
+            "type": "reference_expression",
+            "named": true
+          },
+          {
+            "type": "slice_expression",
+            "named": true
+          },
+          {
+            "type": "string_literal",
+            "named": true
+          },
+          {
+            "type": "struct_expression",
+            "named": true
+          },
+          {
+            "type": "ternary_expression",
+            "named": true
+          },
+          {
+            "type": "unary_expression",
+            "named": true
+          },
+          {
+            "type": "variable_ref",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "do_while",
     "named": true,
     "fields": {
@@ -774,6 +952,10 @@
           },
           {
             "type": "cast_expression",
+            "named": true
+          },
+          {
+            "type": "data_get_expression",
             "named": true
           },
           {
@@ -869,6 +1051,10 @@
             "named": true
           },
           {
+            "type": "data_get_expression",
+            "named": true
+          },
+          {
             "type": "element_expression",
             "named": true
           },
@@ -952,6 +1138,10 @@
           },
           {
             "type": "cast_expression",
+            "named": true
+          },
+          {
+            "type": "data_get_expression",
             "named": true
           },
           {
@@ -1117,6 +1307,10 @@
             "named": true
           },
           {
+            "type": "data_get_expression",
+            "named": true
+          },
+          {
             "type": "element_expression",
             "named": true
           },
@@ -1213,6 +1407,10 @@
             "named": true
           },
           {
+            "type": "data_get_expression",
+            "named": true
+          },
+          {
             "type": "element_expression",
             "named": true
           },
@@ -1306,6 +1504,10 @@
           },
           {
             "type": "cast_expression",
+            "named": true
+          },
+          {
+            "type": "data_get_expression",
             "named": true
           },
           {
@@ -1511,6 +1713,10 @@
             "named": true
           },
           {
+            "type": "data_get_expression",
+            "named": true
+          },
+          {
             "type": "element_expression",
             "named": true
           },
@@ -1647,6 +1853,10 @@
             "named": true
           },
           {
+            "type": "data_get_expression",
+            "named": true
+          },
+          {
             "type": "element_expression",
             "named": true
           },
@@ -1736,6 +1946,10 @@
           },
           {
             "type": "cast_expression",
+            "named": true
+          },
+          {
+            "type": "data_get_expression",
             "named": true
           },
           {
@@ -1832,6 +2046,10 @@
           },
           {
             "type": "cast_expression",
+            "named": true
+          },
+          {
+            "type": "data_get_expression",
             "named": true
           },
           {
@@ -1938,6 +2156,10 @@
         },
         {
           "type": "cast_expression",
+          "named": true
+        },
+        {
+          "type": "data_get_expression",
           "named": true
         },
         {
@@ -2099,6 +2321,10 @@
             "named": true
           },
           {
+            "type": "data_get_expression",
+            "named": true
+          },
+          {
             "type": "element_expression",
             "named": true
           },
@@ -2205,6 +2431,10 @@
             "named": true
           },
           {
+            "type": "data_get_expression",
+            "named": true
+          },
+          {
             "type": "element_expression",
             "named": true
           },
@@ -2298,6 +2528,10 @@
           },
           {
             "type": "cast_expression",
+            "named": true
+          },
+          {
+            "type": "data_get_expression",
             "named": true
           },
           {
@@ -2401,6 +2635,10 @@
         },
         {
           "type": "context_statement",
+          "named": true
+        },
+        {
+          "type": "data_set_statement",
           "named": true
         },
         {
@@ -2550,6 +2788,10 @@
           "named": true
         },
         {
+          "type": "data_get_expression",
+          "named": true
+        },
+        {
           "type": "element_expression",
           "named": true
         },
@@ -2688,6 +2930,10 @@
           "named": true
         },
         {
+          "type": "data_get_expression",
+          "named": true
+        },
+        {
           "type": "element_expression",
           "named": true
         },
@@ -2813,6 +3059,10 @@
             "named": true
           },
           {
+            "type": "data_get_expression",
+            "named": true
+          },
+          {
             "type": "element_expression",
             "named": true
           },
@@ -2899,6 +3149,10 @@
             "named": true
           },
           {
+            "type": "data_get_expression",
+            "named": true
+          },
+          {
             "type": "element_expression",
             "named": true
           },
@@ -2982,6 +3236,10 @@
           },
           {
             "type": "cast_expression",
+            "named": true
+          },
+          {
+            "type": "data_get_expression",
             "named": true
           },
           {
@@ -3075,6 +3333,10 @@
         },
         {
           "type": "context_statement",
+          "named": true
+        },
+        {
+          "type": "data_set_statement",
           "named": true
         },
         {
@@ -3221,6 +3483,10 @@
           },
           {
             "type": "cast_expression",
+            "named": true
+          },
+          {
+            "type": "data_get_expression",
             "named": true
           },
           {
@@ -3392,6 +3658,10 @@
             "named": true
           },
           {
+            "type": "data_get_expression",
+            "named": true
+          },
+          {
             "type": "element_expression",
             "named": true
           },
@@ -3478,6 +3748,10 @@
             "named": true
           },
           {
+            "type": "data_get_expression",
+            "named": true
+          },
+          {
             "type": "element_expression",
             "named": true
           },
@@ -3561,6 +3835,10 @@
           },
           {
             "type": "cast_expression",
+            "named": true
+          },
+          {
+            "type": "data_get_expression",
             "named": true
           },
           {
@@ -3717,6 +3995,10 @@
             "named": true
           },
           {
+            "type": "data_get_expression",
+            "named": true
+          },
+          {
             "type": "element_expression",
             "named": true
           },
@@ -3865,6 +4147,10 @@
             "named": true
           },
           {
+            "type": "data_get_expression",
+            "named": true
+          },
+          {
             "type": "element_expression",
             "named": true
           },
@@ -3990,6 +4276,10 @@
           },
           {
             "type": "cast_expression",
+            "named": true
+          },
+          {
+            "type": "data_get_expression",
             "named": true
           },
           {
@@ -4249,6 +4539,10 @@
     "named": false
   },
   {
+    "type": "block",
+    "named": false
+  },
+  {
     "type": "command_arg",
     "named": true
   },
@@ -4267,6 +4561,10 @@
   },
   {
     "type": "controller",
+    "named": false
+  },
+  {
+    "type": "data",
     "named": false
   },
   {
@@ -4366,6 +4664,10 @@
     "named": false
   },
   {
+    "type": "nbt_path",
+    "named": true
+  },
+  {
     "type": "ocean_floor",
     "named": false
   },
@@ -4406,6 +4708,10 @@
     "named": false
   },
   {
+    "type": "resource_location",
+    "named": true
+  },
+  {
     "type": "return",
     "named": false
   },
@@ -4415,6 +4721,10 @@
   },
   {
     "type": "static",
+    "named": false
+  },
+  {
+    "type": "storage",
     "named": false
   },
   {

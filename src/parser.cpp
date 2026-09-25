@@ -460,6 +460,8 @@ std::unique_ptr<Expr> Parser::parsePrimary() {
   const Token &tok = peek();
 
   switch (tok.kind) {
+  case TokenKind::KwData:
+    return parseDataGetExpr();
   case TokenKind::IntegerLit: {
     advance();
     return makeExpr(tok, IntLit{.text = std::string(tok.text)});
@@ -585,6 +587,117 @@ std::string Parser::parseVecText(int n) {
   return std::string(source.substr(startByte, previous().endByte - startByte));
 }
 
+std::string Parser::parseResourceLocationText() {
+  uint32_t startByte = peek().startByte;
+  size_t i = startByte;
+  auto isChar = [](char c) { return static_cast<bool>(std::isalnum(static_cast<unsigned char>(c))) || c == '_' || c == '-' || c == '.' || c == '/' || c == ':'; };
+  while (i < source.size() && isChar(source[i])) i++;
+  if (i == startByte) error(peek(), "Expected a resource location (e.g. foo:bar/baz)");
+  uint32_t endByte = static_cast<uint32_t>(i);
+  while (pos < tokens.size() - 1 && tokens[pos].startByte < endByte) pos++;
+  return std::string(source.substr(startByte, endByte - startByte));
+}
+
+std::string Parser::parseNbtPathText() {
+  uint32_t startByte = peek().startByte;
+  size_t i = startByte;
+  while (i < source.size()) {
+    char c = source[i];
+    if (c == '"' || c == '\'') {
+      char quote = c;
+      i++;
+      while (i < source.size() && source[i] != quote) {
+        if (source[i] == '\\' && i + 1 < source.size()) i++;
+        i++;
+      }
+      if (i < source.size()) i++;
+      continue;
+    }
+    if (std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '.' || c == '[' || c == ']' || c == '-' || c == '+') {
+      i++;
+      continue;
+    }
+    break;
+  }
+  if (i == startByte) error(peek(), "Expected an NBT path (e.g. foo.bar[0])");
+  uint32_t endByte = static_cast<uint32_t>(i);
+  while (pos < tokens.size() - 1 && tokens[pos].startByte < endByte) pos++;
+  return std::string(source.substr(startByte, endByte - startByte));
+}
+
+Parser::DataTargetParts Parser::parseDataTargetParts() {
+  SourceLoc kindLoc = locOf(peek());
+  std::string kind;
+  if (checkIdentifierText("storage")) kind = "storage";
+  else if (checkIdentifierText("entity")) kind = "entity";
+  else if (checkIdentifierText("block")) kind = "block";
+  else error(peek(), "Expected 'storage', 'entity', or 'block' after 'data'");
+  advance();
+  kindLoc.endByte = previous().endByte;
+
+  SourceLoc targetLoc = locOf(peek());
+  std::string target = kind == "storage" ? parseResourceLocationText() : kind == "entity" ? parseSelectorText() : parseVecText(3);
+  targetLoc.endByte = previous().endByte;
+
+  SourceLoc pathLoc = locOf(peek());
+  std::string path = parseNbtPathText();
+  pathLoc.endByte = previous().endByte;
+
+  return DataTargetParts{.kind = std::move(kind), .target = std::move(target), .path = std::move(path), .kindLoc = kindLoc, .targetLoc = targetLoc, .pathLoc = pathLoc};
+}
+
+std::unique_ptr<Expr> Parser::parseDataGetExpr() {
+  const Token &startTok = peek();
+  advance(); // 'data'
+  DataTargetParts parts = parseDataTargetParts();
+  return makeExpr(
+    startTok,
+    DataGetExpr{
+      .kind = std::move(parts.kind),
+      .target = std::move(parts.target),
+      .path = std::move(parts.path),
+      .kindLoc = parts.kindLoc,
+      .targetLoc = parts.targetLoc,
+      .pathLoc = parts.pathLoc
+    }
+  );
+}
+
+std::unique_ptr<Stmt> Parser::parseDataStmt() {
+  const Token &startTok = peek();
+  advance(); // 'data'
+  DataTargetParts parts = parseDataTargetParts();
+
+  if (match(TokenKind::Eq)) {
+    auto value = parseExpression();
+    return makeStmt(
+      startTok,
+      DataSetStmt{
+        .kind = std::move(parts.kind),
+        .target = std::move(parts.target),
+        .path = std::move(parts.path),
+        .kindLoc = parts.kindLoc,
+        .targetLoc = parts.targetLoc,
+        .pathLoc = parts.pathLoc,
+        .value = std::move(value)
+      }
+    );
+  }
+
+  auto expr = makeExpr(
+    startTok,
+    DataGetExpr{
+      .kind = std::move(parts.kind),
+      .target = std::move(parts.target),
+      .path = std::move(parts.path),
+      .kindLoc = parts.kindLoc,
+      .targetLoc = parts.targetLoc,
+      .pathLoc = parts.pathLoc
+    }
+  );
+  return makeStmt(startTok, ExprStmt{.expr = std::move(expr)});
+}
+
 bool Parser::atStatementEnd() const { return check(TokenKind::Semicolon) || check(TokenKind::Newline) || check(TokenKind::EndOfFile); }
 
 void Parser::consumeStatementTerminator() {
@@ -629,6 +742,7 @@ void Parser::synchronize() {
     case TokenKind::KwStruct:
     case TokenKind::KwEnum:
     case TokenKind::KwType:
+    case TokenKind::KwData:
     case TokenKind::KwImport:
     case TokenKind::KwNamespace:
     case TokenKind::KwIf:
@@ -929,7 +1043,8 @@ std::unique_ptr<Stmt> Parser::parseTypeAliasDecl(bool isExport, bool isExtern) {
   SourceLoc typeLoc;
   std::string typeText = parseTypeText(typeLoc);
   return makeStmt(
-    startTok, TypeAliasDeclStmt{.isExport = isExport, .isExtern = isExtern, .name = std::move(name), .nameLoc = nameLoc, .typeText = std::move(typeText), .typeLoc = typeLoc}
+    startTok,
+    TypeAliasDeclStmt{.isExport = isExport, .isExtern = isExtern, .name = std::move(name), .nameLoc = nameLoc, .typeText = std::move(typeText), .typeLoc = typeLoc}
   );
 }
 
@@ -1193,6 +1308,9 @@ std::unique_ptr<Stmt> Parser::parseStatement() {
   } else if (check(TokenKind::KwType)) {
     if (tag.has_value()) error(peek(), "'type' cannot be preceded by a tag");
     stmt = parseTypeAliasDecl(isExport, isExtern);
+  } else if (check(TokenKind::KwData)) {
+    if (tag.has_value() || isExport || isExtern) error(peek(), "'data' cannot be preceded by a tag or modifiers");
+    stmt = parseDataStmt();
   } else if (check(TokenKind::KwLet) || check(TokenKind::KwConst)) {
     if (tag.has_value()) error(peek(), "Variable declarations cannot be preceded by a tag");
     stmt = parseVarDecl(isExport, isExtern, isEntityLocal);

@@ -370,6 +370,9 @@ private:
 
   ExpressionData compileLambdaExpr(const LambdaExpr &n, std::optional<Type> expectedType, unsigned int id, SourceLoc loc);
 
+  ExpressionData compileDataGetExpr(const DataGetExpr &n, std::optional<Type> expectedType, unsigned int id, SourceLoc loc);
+  std::string compileDataSetStmt(const DataSetStmt &n, SourceLoc loc);
+
   void collectFreeVariableNames(const Block &block, std::unordered_set<std::string> &out);
   void collectFreeVariableNames(const Expr &expr, std::unordered_set<std::string> &out);
   void collectFreeVariableNames(const Stmt &stmt, std::unordered_set<std::string> &out);

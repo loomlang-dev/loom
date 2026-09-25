@@ -60,6 +60,16 @@ private:
   std::string parseNamespacedArgText();
   std::string parseImportPathText();
   std::string parseVecText(int n);
+  std::string parseResourceLocationText();
+  std::string parseNbtPathText();
+
+  struct DataTargetParts {
+    std::string kind, target, path;
+    SourceLoc kindLoc, targetLoc, pathLoc;
+  };
+  DataTargetParts parseDataTargetParts();
+  std::unique_ptr<Expr> parseDataGetExpr();
+  std::unique_ptr<Stmt> parseDataStmt();
 
   std::unique_ptr<Block> parseBlock();
   std::unique_ptr<Stmt> parseStatement();

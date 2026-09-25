@@ -23,6 +23,8 @@ const char *tokenKindName(TokenKind kind) {
     return "enum";
   case TokenKind::KwType:
     return "type";
+  case TokenKind::KwData:
+    return "data";
   case TokenKind::KwFunc:
     return "func";
   case TokenKind::KwIf:
@@ -139,6 +141,7 @@ static const std::unordered_map<std::string_view, TokenKind> &keywordTable() {
     {"if", TokenKind::KwIf},         {"else", TokenKind::KwElse},           {"while", TokenKind::KwWhile},   {"do", TokenKind::KwDo},       {"for", TokenKind::KwFor},
     {"in", TokenKind::KwIn},         {"return", TokenKind::KwReturn},       {"import", TokenKind::KwImport}, {"as", TokenKind::KwAs},       {"export", TokenKind::KwExport},
     {"extern", TokenKind::KwExtern}, {"namespace", TokenKind::KwNamespace}, {"true", TokenKind::KwTrue},     {"false", TokenKind::KwFalse}, {"type", TokenKind::KwType},
+    {"data", TokenKind::KwData},
   };
   return table;
 }

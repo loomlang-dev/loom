@@ -4,7 +4,13 @@
 ["export" "extern"] @keyword.storage
 "@entity" @attribute
 ["public" "private" "static"] @keyword.storage
-["let" "const" "enum" "struct" "type" "namespace"] @keyword.storage
+["let" "const" "enum" "struct" "type" "data" "namespace"] @keyword.storage
+(data_get_expression ["storage" "entity" "block"] @keyword.conditional)
+(data_set_statement ["storage" "entity" "block"] @keyword.conditional)
+(data_get_expression target: (resource_location) @string)
+(data_set_statement target: (resource_location) @string)
+(data_get_expression path: (nbt_path) @string.special)
+(data_set_statement path: (nbt_path) @string.special)
 (map_type "map" @type.builtin)
 (map_expression "map" @type.builtin)
 ["if" "else"] @keyword.conditional

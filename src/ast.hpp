@@ -126,6 +126,15 @@ struct Param {
   SourceLoc typeLoc;
 };
 
+struct DataGetExpr {
+  std::string kind;
+  std::string target;
+  std::string path;
+  SourceLoc kindLoc;
+  SourceLoc targetLoc;
+  SourceLoc pathLoc;
+};
+
 struct LambdaExpr {
   std::vector<Param> params;
   std::unique_ptr<Block> body;
@@ -154,7 +163,8 @@ struct Expr {
     StructExpr,
     ListExpr,
     ReferenceExpr,
-    LambdaExpr>
+    LambdaExpr,
+    DataGetExpr>
     data;
 };
 
@@ -307,6 +317,16 @@ struct ContextStmt {
   std::unique_ptr<Block> body;
 };
 
+struct DataSetStmt {
+  std::string kind;
+  std::string target;
+  std::string path;
+  SourceLoc kindLoc;
+  SourceLoc targetLoc;
+  SourceLoc pathLoc;
+  std::unique_ptr<Expr> value;
+};
+
 struct ExprStmt {
   std::unique_ptr<Expr> expr;
 };
@@ -334,6 +354,7 @@ struct Stmt {
     CommandStmt,
     ContextStmt,
     ExprStmt,
-    BlockStmt>
+    BlockStmt,
+    DataSetStmt>
     data;
 };

@@ -44,6 +44,7 @@ module.exports = grammar({
           $.enum_definition,
           $.struct_definition,
           $.type_alias_definition,
+          $.data_set_statement,
           $.variable_declaration,
           $.assignment,
           $.function_definition,
@@ -179,6 +180,18 @@ module.exports = grammar({
       seq(
         field("name", $.namespaced_identifier),
         repeat(choice($.index_access, $.property_access)),
+        "=",
+        field("value", $._expression),
+      ),
+
+    data_set_statement: ($) =>
+      seq(
+        "data",
+        choice(
+          seq("storage", field("target", $.resource_location), field("path", $.nbt_path)),
+          seq("entity", field("target", $.selector), field("path", $.nbt_path)),
+          seq("block", field("target", $.vec3), field("path", $.nbt_path)),
+        ),
         "=",
         field("value", $._expression),
       ),
@@ -341,7 +354,19 @@ module.exports = grammar({
         $.struct_expression,
         $.map_expression,
         $.reference_expression,
+        $.data_get_expression,
       ),
+
+    data_get_expression: ($) =>
+      choice(
+        seq("data", "storage", field("target", $.resource_location), field("path", $.nbt_path)),
+        seq("data", "entity", field("target", $.selector), field("path", $.nbt_path)),
+        seq("data", "block", field("target", $.vec3), field("path", $.nbt_path)),
+      ),
+
+    resource_location: () => /[a-zA-Z0-9_\-./]+:[a-zA-Z0-9_\-./]+/,
+
+    nbt_path: () => /[^\s;=]+/,
 
     lambda_expression: ($) =>
       prec.right(

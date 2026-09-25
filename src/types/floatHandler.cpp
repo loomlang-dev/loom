@@ -87,14 +87,12 @@ public:
     std::string runtimeCommands = leftData + "\n" + rightData + "\n";
 
     if (isMath) {
-      static const std::unordered_map<std::string_view, std::string_view> providerType = {
-        {"+", "add"}, {"-", "sub"}, {"*", "mul"}, {"/", "div"}, {"%", "mod"}
-      };
+      static const std::unordered_map<std::string_view, std::string_view> providerType = {{"+", "add"}, {"-", "sub"}, {"*", "mul"}, {"/", "div"}, {"%", "mod"}};
       const std::string_view type = providerType.at(op);
       const std::string leftRef = std::format("{{type:storage,storage:\"{0}:global\",path:\"expr_float{1}\"}}", compiler.getDatapackNamespace(), id);
       const std::string rightRef = std::format("{{type:storage,storage:\"{0}:global\",path:\"expr_float{1}\"}}", compiler.getDatapackNamespace(), id + 1);
-      const std::string provider = (op == "+" || op == "*") ? std::format("{{type:{},inputs:[{},{}]}}", type, leftRef, rightRef)
-                                                              : std::format("{{type:{},left:{},right:{}}}", type, leftRef, rightRef);
+      const std::string provider =
+        (op == "+" || op == "*") ? std::format("{{type:{},inputs:[{},{}]}}", type, leftRef, rightRef) : std::format("{{type:{},left:{},right:{}}}", type, leftRef, rightRef);
       runtimeCommands += std::format("data modify storage {0}:global expr_float{1} set compute default float {2}", compiler.getDatapackNamespace(), id, provider);
     } else {
       runtimeCommands += std::format(

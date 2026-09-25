@@ -25,7 +25,7 @@ A programming language that compiles to Minecraft datapacks.
 - [x] Force casting (e.g. `int`/`string`/`float` -> `enum`, `string` ->
       `(int, int) -> int`)
 - [x] Custom type definitions
-- [ ] Data access
+- [x] Data access
 - [ ] Classes
 - [ ] Operater overloading
 - [ ] Generics

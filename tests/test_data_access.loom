@@ -1,0 +1,11 @@
+func main() {
+  let health: float = data entity @s Health;
+  let raw: string = data storage loom_test:scratch some.path;
+  let lvl: int = data block ~ ~-1 ~ Level as int;
+
+  data storage loom_test:scratch some.path = 5;
+  data entity @s CustomName = "hi";
+  data block ~ ~ ~ Items[0] = health;
+
+  say ${health} ${raw} ${lvl};
+}

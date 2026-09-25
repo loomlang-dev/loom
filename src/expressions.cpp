@@ -542,6 +542,8 @@ void Compiler::collectFreeVariableNames(const Stmt &stmt, std::unordered_set<std
         collectFreeVariableNames(*n.expr, out);
       } else if constexpr (std::is_same_v<T, BlockStmt>) {
         collectFreeVariableNames(*n.block, out);
+      } else if constexpr (std::is_same_v<T, DataSetStmt>) {
+        collectFreeVariableNames(*n.value, out);
       }
     },
     stmt.data
@@ -677,6 +679,28 @@ Compiler::ExpressionData Compiler::compileLambdaExpr(const LambdaExpr &n, std::o
     return {.data = std::format("\"{}\"", target), .precomputed = true, .type = refType};
   }
   return {.data = envSetup + std::format("data modify storage {}:global expr_str{} set value \"{}\"\n", datapackNamespace, id, target), .precomputed = false, .type = refType};
+}
+
+Compiler::ExpressionData Compiler::compileDataGetExpr(const DataGetExpr &n, std::optional<Type> expectedType, unsigned int id, SourceLoc loc) {
+  if (!expectedType.has_value()) {
+    throw std::runtime_error(
+      formatError(loc, "A 'data " + n.kind + "' read needs a known type; assign it to a typed variable or add 'as <type>' (e.g. 'data " + n.kind + " ... as int').")
+    );
+  }
+
+  std::string dataClause = std::format("{} {} {}", n.kind, n.target, n.path);
+
+  if (expectedType->isInteger() || expectedType->isBoolean()) {
+    return {.data = std::format("execute store result score expr_output{} temp run data get {}", id, dataClause), .precomputed = false, .type = *expectedType};
+  }
+  if (expectedType->isFloat()) {
+    return {.data = std::format("data modify storage {}:global expr_float{} set from {}", datapackNamespace, id, dataClause), .precomputed = false, .type = *expectedType};
+  }
+  if (expectedType->isString() || expectedType->isList() || expectedType->isMap() || expectedType->isStruct()) {
+    return {.data = std::format("data modify storage {}:global expr_str{} set from {}", datapackNamespace, id, dataClause), .precomputed = false, .type = *expectedType};
+  }
+
+  throw std::runtime_error(formatError(loc, "Cannot read 'data' as this type."));
 }
 
 std::string Compiler::copyExprInto(const ExpressionData &expr, const std::string &destPath, unsigned int computedAtId) const {
@@ -1558,8 +1582,13 @@ Compiler::ExpressionData Compiler::compileExpressionImpl(const Expr &node, unsig
       }
 
       else if constexpr (std::is_same_v<T, CastExpr>) {
-        ExpressionData subExpr = compileExpression(*n.expression, id, true);
         Type targetType = parseTypeFromString(n.typeText);
+
+        if (const auto *dataGet = std::get_if<DataGetExpr>(&n.expression->data)) {
+          return compileDataGetExpr(*dataGet, targetType, id, node.loc);
+        }
+
+        ExpressionData subExpr = compileExpression(*n.expression, id, true);
 
         if (subExpr.type == targetType) return subExpr;
 
@@ -1669,6 +1698,10 @@ Compiler::ExpressionData Compiler::compileExpressionImpl(const Expr &node, unsig
 
       else if constexpr (std::is_same_v<T, LambdaExpr>) {
         return compileLambdaExpr(n, std::nullopt, id, node.loc);
+      }
+
+      else if constexpr (std::is_same_v<T, DataGetExpr>) {
+        return compileDataGetExpr(n, std::nullopt, id, node.loc);
       }
 
       else {

@@ -478,8 +478,11 @@ std::string Compiler::compileBlock(const Block &block) {
             }
           }
 
-          const ExpressionData expr =
-            (lambdaAssign && varData.type.isFunction()) ? compileLambdaExpr(*lambdaAssign, varData.type, 1, expNode.loc) : compileExpression(expNode);
+          const auto *dataGetAssign = std::get_if<DataGetExpr>(&expNode.data);
+
+          const ExpressionData expr = (lambdaAssign && varData.type.isFunction()) ? compileLambdaExpr(*lambdaAssign, varData.type, 1, expNode.loc)
+                                      : dataGetAssign ? compileDataGetExpr(*dataGetAssign, varData.type.isRef() ? *varData.type.baseType : varData.type, 1, expNode.loc)
+                                                      : compileExpression(expNode);
 
           const Type &actualType = varData.type.isRef() ? *varData.type.baseType : varData.type;
 
@@ -567,6 +570,10 @@ std::string Compiler::compileBlock(const Block &block) {
         else if constexpr (std::is_same_v<T, ExprStmt>) {
           ExpressionData expr = compileExpression(*n.expr, 1, false);
           ret += expr.data + "\n";
+        }
+
+        else if constexpr (std::is_same_v<T, DataSetStmt>) {
+          ret += compileDataSetStmt(n, stmt.loc);
         }
 
         else if constexpr (std::is_same_v<T, ReturnStmt>) {
@@ -685,4 +692,20 @@ std::string Compiler::compileBlock(const Block &block) {
   std::erase_if(vars, [&block](const auto &pair) { return pair.second.scope == &block; });
 
   return ret;
+}
+
+std::string Compiler::compileDataSetStmt(const DataSetStmt &n, SourceLoc loc) {
+  const ExpressionData expr = compileExpression(*n.value, 1, true);
+  const std::string dataClause = std::format("{} {} {}", n.kind, n.target, n.path);
+
+  if (expr.precomputed) {
+    return std::format("data modify {} set value {}\n", dataClause, expr.data);
+  }
+
+  if (expr.type.isInteger() || expr.type.isBoolean()) {
+    return std::format("{}\nexecute store result {} int 1 run scoreboard players get expr_output1 temp\n", expr.data, dataClause);
+  }
+
+  const std::string srcChannel = expr.type.isFloat() ? "expr_float1" : "expr_str1";
+  return std::format("{}\ndata modify {} set from storage {}:global {}\n", expr.data, dataClause, datapackNamespace, srcChannel);
 }

@@ -637,6 +637,8 @@ bool walkStmt(const Stmt &stmt, WalkCtx ctx, const GlobalIndex &idx, uint32_t of
         return walkExpr(*n.expr, ctx, idx, offset, out);
       } else if constexpr (std::is_same_v<T, BlockStmt>) {
         return walkBlock(*n.block, ctx, idx, offset, out);
+      } else if constexpr (std::is_same_v<T, DataSetStmt>) {
+        return walkExpr(*n.value, ctx, idx, offset, out);
       } else {
         return false;
       }
@@ -940,6 +942,8 @@ void collectStmtTokens(const Stmt &stmt, WalkCtx ctx, const GlobalIndex &idx, st
         collectExprTokens(*n.expr, ctx, idx, out);
       } else if constexpr (std::is_same_v<T, BlockStmt>) {
         collectBlockTokens(*n.block, ctx, idx, out);
+      } else if constexpr (std::is_same_v<T, DataSetStmt>) {
+        collectExprTokens(*n.value, ctx, idx, out);
       }
     },
     stmt.data
@@ -1004,15 +1008,15 @@ void collectSymbols(const Block &block, std::vector<SymbolEntry> &out) {
   }
 }
 
-const char *DECLARATION_KEYWORDS[] = {"let", "const", "struct", "enum", "type", "func", "import", "export", "extern", "namespace", "@entity"};
+const char *DECLARATION_KEYWORDS[] = {"let", "const", "struct", "enum", "type", "data", "func", "import", "export", "extern", "namespace", "@entity"};
 
 const char *CONTROL_FLOW_KEYWORDS[] = {"if", "while", "do", "for", "return", "as", "at", "align", "anchored", "facing", "positioned", "rotated", "on"};
 
-const char *EXPRESSION_KEYWORDS[] = {"true", "false", "at"};
+const char *EXPRESSION_KEYWORDS[] = {"true", "false", "at", "data"};
 
 const char *PRIMITIVE_TYPES[] = {"int", "float", "bool", "string"};
 
-enum class CompletionContext { Name, Type, MemberAccess, ScopeAccess, ImportPath, Expression };
+enum class CompletionContext { Name, Type, MemberAccess, ScopeAccess, ImportPath, DataKind, Expression };
 
 struct PositionAnalysis {
   CompletionContext ctx = CompletionContext::Expression;
@@ -1180,6 +1184,9 @@ PositionAnalysis analyzePosition(const std::string &text, uint32_t offset) {
     return result;
   case TokenKind::KwImport:
     result.ctx = CompletionContext::ImportPath;
+    return result;
+  case TokenKind::KwData:
+    result.ctx = CompletionContext::DataKind;
     return result;
   default:
     break;
@@ -1362,6 +1369,13 @@ std::vector<CompletionEntry> completionItems(const Block &program, const std::st
   PositionAnalysis pos = analyzePosition(text, offset);
 
   if (pos.ctx == CompletionContext::Name) return items;
+
+  if (pos.ctx == CompletionContext::DataKind) {
+    items.push_back(CompletionEntry{.label = "storage", .kind = "keyword", .detail = "data storage <namespace:path> <nbt path>"});
+    items.push_back(CompletionEntry{.label = "entity", .kind = "keyword", .detail = "data entity <selector> <nbt path>"});
+    items.push_back(CompletionEntry{.label = "block", .kind = "keyword", .detail = "data block <x> <y> <z> <nbt path>"});
+    return items;
+  }
 
   if (pos.ctx == CompletionContext::ImportPath) {
     std::unordered_set<std::string> seen;

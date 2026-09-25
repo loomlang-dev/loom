@@ -70,6 +70,24 @@ for f in "$TEST_DIR"/*.loom; do
     fi
   fi
 
+  if [ "$name" = "test_data_access" ]; then
+    if ! grep -rq "set from entity @s Health" "$od/data"; then
+      echo "FAIL: $name did not emit a direct entity NBT read"
+      failures=$((failures+1))
+      continue
+    fi
+    if ! grep -rq "run data get block ~ ~-1 ~ Level" "$od/data"; then
+      echo "FAIL: $name did not emit a direct block NBT read via 'as int'"
+      failures=$((failures+1))
+      continue
+    fi
+    if ! grep -rq "data modify storage loom_test:scratch some.path set value 5" "$od/data"; then
+      echo "FAIL: $name did not emit a direct storage NBT write"
+      failures=$((failures+1))
+      continue
+    fi
+  fi
+
   if [ "$name" = "test_type_alias" ]; then
     if ! grep -rq "internal_call_ref_int" "$od/data"; then
       echo "FAIL: $name did not emit the indirect-call helper for the function-type alias call"
