@@ -38,8 +38,3 @@ A programming language that compiles to Minecraft datapacks.
 - [ ] Variant types
 - [x] C++-based language server
 - [ ] `comptime` keyword
-
-## Credits
-
-- @oligomc for the float addition and subtraction techniques
-- @gibbsly for the float multiplication, division, and modulo techniques
